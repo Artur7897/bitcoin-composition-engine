@@ -1,6 +1,6 @@
-# OrdiFi Core v2
+Bitcoin Composition Engine (BCE)
 
-OrdiFi Core v2 is a deterministic Bitcoin UTXO composition and verification
+BCE is a deterministic Bitcoin UTXO composition and verification
 engine written in Rust.
 
 It implements four operations:
@@ -9,9 +9,6 @@ It implements four operations:
 - Split
 - Extract
 - Insert
-
-Core v2 is currently a release candidate. Production continues using Core v1
-until the webapp migration and real wallet end-to-end tests are complete.
 
 ## Core principle
 
@@ -23,8 +20,6 @@ The Core understands only canonical Bitcoin geometry:
 - physical order
 - source UTXOs
 
-It does not understand visual or application concepts such as Cases, Albums,
-Suitcases, Grids, Organizer applications or agent layers.
 
 ```text
 Viewer / Composer
