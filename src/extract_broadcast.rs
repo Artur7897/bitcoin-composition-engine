@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::process::Command;
+use serde_json::{json, Value};
+use std::env;
 
 #[derive(Debug, Deserialize)]
 pub struct ExtractBroadcastRequest {
@@ -41,7 +41,6 @@ pub fn run_extract_broadcast(req: ExtractBroadcastRequest) -> Result<ExtractBroa
     )?;
 
     let parent_decoded = decode_raw_tx(&parent_raw)?;
-
     let parent_txid = decoded_txid(&parent_decoded)?;
 
     if parent_txid != req.expected_parent_txid {
@@ -184,7 +183,7 @@ pub(crate) fn resolve_raw_tx(
 }
 
 fn finalize_psbt_to_raw_tx(signed_psbt: &str) -> Result<String> {
-    let response = bitcoin_cli(&["finalizepsbt", signed_psbt])?;
+    let response = bitcoin_rpc("finalizepsbt", &[signed_psbt])?;
 
     let json: Value = serde_json::from_str(&response)
         .map_err(|error| anyhow!("failed to parse finalizepsbt response: {}", error))?;
@@ -211,7 +210,7 @@ fn finalize_psbt_to_raw_tx(signed_psbt: &str) -> Result<String> {
 }
 
 pub(crate) fn decode_raw_tx(raw_tx: &str) -> Result<Value> {
-    let response = bitcoin_cli(&["decoderawtransaction", raw_tx])?;
+    let response = bitcoin_rpc("decoderawtransaction", &[raw_tx])?;
 
     serde_json::from_str(&response)
         .map_err(|error| anyhow!("failed to parse decoded transaction: {}", error))
@@ -250,7 +249,7 @@ fn verify_recompose_spends_parent(decoded: &Value, parent_txid: &str) -> Result<
 }
 
 pub(crate) fn broadcast_or_accept_known(raw_tx: &str, expected_txid: &str) -> Result<String> {
-    match bitcoin_cli(&["sendrawtransaction", raw_tx]) {
+    match bitcoin_rpc("sendrawtransaction", &[raw_tx]) {
         Ok(txid) => Ok(txid),
 
         Err(error) => {
@@ -264,27 +263,48 @@ pub(crate) fn broadcast_or_accept_known(raw_tx: &str, expected_txid: &str) -> Re
 }
 
 fn transaction_is_known(txid: &str) -> bool {
-    if bitcoin_cli(&["getmempoolentry", txid]).is_ok() {
+    if bitcoin_rpc("getmempoolentry", &[txid]).is_ok() {
         return true;
     }
 
-    bitcoin_cli(&["getrawtransaction", txid]).is_ok()
+    bitcoin_rpc("getrawtransaction", &[txid]).is_ok()
 }
 
-fn bitcoin_cli(args: &[&str]) -> Result<String> {
-    let output = Command::new("bitcoin-cli")
-        .args(args)
-        .output()
-        .map_err(|error| anyhow!("failed to run bitcoin-cli: {}", error))?;
+fn bitcoin_rpc(method: &str, params: &[&str]) -> Result<String> {
+    let rpc_url =
+        env::var("BITCOIN_RPC_URL").unwrap_or_else(|_| "http://ordifinode:8332".to_string());
 
-    if !output.status.success() {
-        return Err(anyhow!(
-            "bitcoin-cli failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+    let rpc_user = env::var("BITCOIN_RPC_USER").map_err(|_| anyhow!("BITCOIN_RPC_USER missing"))?;
+
+    let rpc_pass = env::var("BITCOIN_RPC_PASS").map_err(|_| anyhow!("BITCOIN_RPC_PASS missing"))?;
+
+    let client = reqwest::blocking::Client::new();
+
+    let response = client
+        .post(&rpc_url)
+        .basic_auth(rpc_user, Some(rpc_pass))
+        .json(&json!({
+            "jsonrpc": "1.0",
+            "id": "ordifi-extract-broadcast",
+            "method": method,
+            "params": params,
+        }))
+        .send()?;
+
+    let value: Value = response.json()?;
+
+    if !value["error"].is_null() {
+        return Err(anyhow!("bitcoin rpc error: {}", value["error"]));
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    let result = value
+        .get("result")
+        .ok_or_else(|| anyhow!("bitcoin rpc method {} returned no result", method))?;
+
+    match result {
+        Value::String(value) => Ok(value.clone()),
+        _ => Ok(serde_json::to_string(result)?),
+    }
 }
 
 pub(crate) fn has_text(value: Option<&str>) -> bool {
