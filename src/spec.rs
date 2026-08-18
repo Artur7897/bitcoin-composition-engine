@@ -62,35 +62,17 @@ impl StructuralSpec {
 }
 
 /*
- * Liest die semantische Struktursprache.
+ * Reads the canonical structural language.
  *
- * Priorität:
- *
- * 1. Neue kanonische "structure"-Sprache
- * 2. Bisherige Suitcase-/Album-Sprache
- * 3. Bisherige Case-Sprache
- * 4. Bisherige Grid-Sprache
- *
- * Visuelle Felder werden vollständig ignoriert.
+ * Application, presentation, and other unrelated fields are ignored.
+ * BCE does not infer structure from application-specific metadata.
  */
 pub fn read_structural_spec(value: &Value) -> Result<StructuralSpec> {
-    if let Some(structure) = value.get("structure") {
-        return read_canonical_structure(structure);
-    }
+    let structure = value
+        .get("structure")
+        .ok_or_else(|| anyhow!("spec contains no canonical structure"))?;
 
-    if let Some(spec) = read_legacy_collector_structure(value)? {
-        return Ok(spec);
-    }
-
-    if let Some(spec) = read_legacy_case_structure(value)? {
-        return Ok(spec);
-    }
-
-    if let Some(spec) = read_legacy_grid_structure(value)? {
-        return Ok(spec);
-    }
-
-    bail!("spec contains no supported structural language")
+    read_canonical_structure(structure)
 }
 
 fn read_canonical_structure(value: &Value) -> Result<StructuralSpec> {
@@ -115,162 +97,6 @@ fn read_canonical_structure(value: &Value) -> Result<StructuralSpec> {
     })
 }
 
-/*
- * Adapter für die bisherige Suitcase-/Album-Sprache:
- *
- * compose.root
- * compose.children
- * hierarchy
- */
-fn read_legacy_collector_structure(value: &Value) -> Result<Option<StructuralSpec>> {
-    if value.pointer("/compose/root").is_none() || value.pointer("/compose/children").is_none() {
-        return Ok(None);
-    }
-
-    let embedded: LegacyCollectorSpec = serde_json::from_value(value.clone())
-        .map_err(|error| anyhow!("invalid legacy collector spec: {}", error))?;
-
-    if embedded.compose.children.range_type != "offset-range" {
-        bail!(
-            "unsupported children type: {}",
-            embedded.compose.children.range_type
-        );
-    }
-
-    if let Some(hierarchy) = embedded.hierarchy.as_ref() {
-        if hierarchy.root_level != embedded.compose.root.level {
-            bail!(
-                "compose root level {} does not match hierarchy root level {}",
-                embedded.compose.root.level,
-                hierarchy.root_level
-            );
-        }
-
-        if hierarchy.child_level != embedded.compose.children.level {
-            bail!(
-                "compose child level {} does not match hierarchy child level {}",
-                embedded.compose.children.level,
-                hierarchy.child_level
-            );
-        }
-
-        if hierarchy.direction != embedded.compose.children.side {
-            bail!("compose side does not match hierarchy direction");
-        }
-    }
-
-    let compose_limit = embedded.compose.children.max_items;
-
-    let hierarchy_limit = embedded
-        .hierarchy
-        .as_ref()
-        .and_then(|hierarchy| hierarchy.max_groups);
-
-    let max_children = match (compose_limit, hierarchy_limit) {
-        (Some(compose), Some(hierarchy)) if compose != hierarchy => {
-            bail!(
-                "compose maxItems {} does not match hierarchy maxGroups {}",
-                compose,
-                hierarchy
-            );
-        }
-
-        (Some(value), _) | (_, Some(value)) => value,
-
-        (None, None) => {
-            bail!("legacy structural spec has no group limit");
-        }
-    };
-
-    let spec = single_relation_spec(
-        embedded.compose.root.level,
-        embedded.compose.children.level,
-        embedded.compose.children.side,
-        max_children,
-    );
-
-    validate_structural_spec(spec).map(Some)
-}
-
-/*
- * Adapter für die bisherige Case-Sprache:
- *
- * compose.role = append-layout
- * compose.displayedContent.direction = -
- * slotCount = 1
- *
- * Die Case-Inskription ist der semantische Root.
- * Das dargestellte Ordinal liegt auf ihrer negativen Seite.
- */
-fn read_legacy_case_structure(value: &Value) -> Result<Option<StructuralSpec>> {
-    let role = value.pointer("/compose/role").and_then(Value::as_str);
-
-    if role != Some("append-layout") {
-        return Ok(None);
-    }
-
-    let direction_value = value
-        .pointer("/compose/displayedContent/direction")
-        .ok_or_else(|| anyhow!("legacy case spec has no displayed content direction"))?;
-
-    let direction = read_direction(direction_value, "case direction")?;
-
-    let max_children = read_slot_count(value)?;
-
-    let spec = single_relation_spec("A".to_string(), "B".to_string(), direction, max_children);
-
-    validate_structural_spec(spec).map(Some)
-}
-
-/*
- * Adapter für die bisherige Display-Grid-Sprache.
- *
- * Ein Grid hat keine alte compose-Struktur.
- * Der Grid-Root liegt vor seinen Slots.
- */
-fn read_legacy_grid_structure(value: &Value) -> Result<Option<StructuralSpec>> {
-    let is_container = value.get("type").and_then(Value::as_str) == Some("container");
-
-    let is_display_grid = value
-        .get("model")
-        .and_then(Value::as_str)
-        .map(|model| model.starts_with("display-grid-"))
-        .unwrap_or(false);
-
-    if !is_container && !is_display_grid {
-        return Ok(None);
-    }
-
-    let max_children = read_slot_count(value)?;
-
-    let spec = single_relation_spec(
-        "A".to_string(),
-        "B".to_string(),
-        Direction::Positive,
-        max_children,
-    );
-
-    validate_structural_spec(spec).map(Some)
-}
-
-fn single_relation_spec(
-    root_level: String,
-    child_level: String,
-    direction: Direction,
-    max_children: usize,
-) -> StructuralSpec {
-    StructuralSpec {
-        version: 1,
-        root_level: root_level.clone(),
-        relations: vec![StructuralRelation {
-            parent_level: root_level,
-            child_level,
-            direction,
-            max_children,
-        }],
-    }
-}
-
 fn validate_structural_spec(spec: StructuralSpec) -> Result<StructuralSpec> {
     if spec.version != 1 {
         bail!("unsupported structural spec version: {}", spec.version);
@@ -286,11 +112,9 @@ fn validate_structural_spec(spec: StructuralSpec) -> Result<StructuralSpec> {
 
     for relation in &spec.relations {
         validate_level("relation parent", &relation.parent_level)?;
-
         validate_level("relation child", &relation.child_level)?;
 
         let parent_index = level_index(&relation.parent_level)?;
-
         let child_index = level_index(&relation.child_level)?;
 
         let expected_child = parent_index
@@ -386,25 +210,6 @@ fn level_index(level: &str) -> Result<u8> {
     Ok(bytes[0] - b'A')
 }
 
-fn read_slot_count(value: &Value) -> Result<usize> {
-    let slot_count = value
-        .get("slotCount")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| anyhow!("structural spec has no slotCount"))?;
-
-    let slot_count = usize::try_from(slot_count).map_err(|_| anyhow!("slotCount is too large"))?;
-
-    if slot_count == 0 {
-        bail!("slotCount must be greater than zero");
-    }
-
-    Ok(slot_count)
-}
-
-fn read_direction(value: &Value, label: &str) -> Result<Direction> {
-    serde_json::from_value(value.clone()).map_err(|error| anyhow!("invalid {}: {}", label, error))
-}
-
 fn direction_symbol(direction: Direction) -> &'static str {
     match direction {
         Direction::Positive => "+",
@@ -412,61 +217,16 @@ fn direction_symbol(direction: Direction) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LegacyCollectorSpec {
-    compose: LegacyComposeStructure,
-
-    #[serde(default)]
-    hierarchy: Option<LegacyHierarchyStructure>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LegacyComposeStructure {
-    root: LegacyRootStructure,
-    children: LegacyChildrenStructure,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LegacyRootStructure {
-    level: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LegacyChildrenStructure {
-    #[serde(rename = "type")]
-    range_type: String,
-
-    side: Direction,
-    level: String,
-
-    #[serde(default)]
-    max_items: Option<usize>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LegacyHierarchyStructure {
-    root_level: String,
-    child_level: String,
-    direction: Direction,
-
-    #[serde(default)]
-    max_groups: Option<usize>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    fn canonical_suitcase_spec() -> Value {
+    fn canonical_spec() -> Value {
         json!({
-            "ordifi": "1.0",
-            "kind": "suitcase",
+            "application": {
+                "name": "example"
+            },
 
             "structure": {
                 "version": 1,
@@ -481,8 +241,8 @@ mod tests {
                 ]
             },
 
-            "render": {
-                "component": "storageGrid",
+            "presentation": {
+                "component": "example",
                 "x": 100,
                 "y": 200
             }
@@ -491,7 +251,7 @@ mod tests {
 
     #[test]
     fn reads_canonical_structural_dictionary() {
-        let result = read_structural_spec(&canonical_suitcase_spec()).unwrap();
+        let result = read_structural_spec(&canonical_spec()).unwrap();
 
         assert_eq!(result.version, 1);
         assert_eq!(result.root_level, "A");
@@ -530,18 +290,17 @@ mod tests {
 
         let result = read_structural_spec(&value).unwrap();
 
-        assert!(result.relation("A", "B", Direction::Negative,).is_some());
-
-        assert!(result.relation("A", "B", Direction::Positive,).is_some());
+        assert!(result.relation("A", "B", Direction::Negative).is_some());
+        assert!(result.relation("A", "B", Direction::Positive).is_some());
     }
 
     #[test]
-    fn ignores_visual_fields() {
-        let mut value = canonical_suitcase_spec();
+    fn ignores_unrelated_fields() {
+        let mut value = canonical_spec();
 
-        value["render"]["x"] = json!(999999);
+        value["presentation"]["x"] = json!(999999);
 
-        value["layout"] = json!({
+        value["anythingElse"] = json!({
             "width": 2048,
             "height": 2048
         });
@@ -552,71 +311,19 @@ mod tests {
     }
 
     #[test]
-    fn reads_legacy_suitcase_dictionary() {
+    fn rejects_missing_canonical_structure() {
         let value = json!({
-            "compose": {
-                "root": {
-                    "level": "A",
-                    "offset": 0
-                },
-                "children": {
-                    "type": "offset-range",
-                    "side": "+",
-                    "level": "B",
-                    "maxItems": 48
-                }
+            "application": {
+                "name": "example"
             },
-            "hierarchy": {
-                "rootLevel": "A",
-                "childLevel": "B",
-                "direction": "+",
-                "maxGroups": 48
-            }
+            "direction": "-",
+            "slotCount": 48
         });
 
-        let result = read_structural_spec(&value).unwrap();
+        let error =
+            read_structural_spec(&value).expect_err("missing canonical structure must fail");
 
-        assert_eq!(result.root_level, "A");
-        assert_eq!(result.relations[0].max_children, 48);
-    }
-
-    #[test]
-    fn reads_legacy_case_dictionary() {
-        let value = json!({
-            "kind": "layout",
-            "layoutName": "case",
-            "compose": {
-                "role": "append-layout",
-                "displayedContent": {
-                    "type": "offset",
-                    "direction": "-",
-                    "offset": 0
-                }
-            },
-            "slotCount": 1
-        });
-
-        let result = read_structural_spec(&value).unwrap();
-
-        assert_eq!(result.relations[0].direction, Direction::Negative);
-
-        assert_eq!(result.relations[0].max_children, 1);
-    }
-
-    #[test]
-    fn reads_legacy_grid_dictionary() {
-        let value = json!({
-            "kind": "layout",
-            "type": "container",
-            "model": "display-grid-4",
-            "slotCount": 4
-        });
-
-        let result = read_structural_spec(&value).unwrap();
-
-        assert_eq!(result.relations[0].direction, Direction::Positive);
-
-        assert_eq!(result.relations[0].max_children, 4);
+        assert!(error.to_string().contains("no canonical structure"));
     }
 
     #[test]

@@ -271,8 +271,7 @@ fn transaction_is_known(txid: &str) -> bool {
 }
 
 fn bitcoin_rpc(method: &str, params: &[&str]) -> Result<String> {
-    let rpc_url =
-        env::var("BITCOIN_RPC_URL").unwrap_or_else(|_| "http://ordifinode:8332".to_string());
+    let rpc_url = env::var("BITCOIN_RPC_URL").map_err(|_| anyhow!("BITCOIN_RPC_URL missing"))?;
 
     let rpc_user = env::var("BITCOIN_RPC_USER").map_err(|_| anyhow!("BITCOIN_RPC_USER missing"))?;
 
@@ -285,7 +284,7 @@ fn bitcoin_rpc(method: &str, params: &[&str]) -> Result<String> {
         .basic_auth(rpc_user, Some(rpc_pass))
         .json(&json!({
             "jsonrpc": "1.0",
-            "id": "ordifi-extract-broadcast",
+            "id": "bce-extract-broadcast",
             "method": method,
             "params": params,
         }))

@@ -714,27 +714,27 @@ mod tests {
     }
 
     #[test]
-    fn case_compose_places_ordinal_before_semantic_root() {
-        let ordinal_txid = "b".repeat(64);
-        let case_txid = "c".repeat(64);
+    fn negative_direction_places_child_before_semantic_root() {
+        let child_txid = "b".repeat(64);
+        let node_txid = "c".repeat(64);
 
         let mut specs = BTreeMap::new();
 
-        specs.insert("CASE".to_string(), one_side_spec("-", 1));
+        specs.insert("NODE".to_string(), one_side_spec("-", 1));
 
         let result = verify_compose(VerifyComposeRequest {
             intent: VerifyComposeNodeIntent {
-                id: "CASE".to_string(),
+                id: "NODE".to_string(),
                 direction: None,
                 children: vec![VerifyComposeNodeIntent {
-                    id: "ORDINAL".to_string(),
+                    id: "LEAF".to_string(),
                     direction: None,
                     children: vec![],
                 }],
             },
             sources: vec![
-                source(&case_txid, 546, vec![("CASE", 0)]),
-                source(&ordinal_txid, 600, vec![("ORDINAL", 0)]),
+                source(&node_txid, 546, vec![("NODE", 0)]),
+                source(&child_txid, 600, vec![("LEAF", 0)]),
             ],
             specs,
             fee_rate: Some(1),
@@ -742,44 +742,44 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(result.physical_root_id, "ORDINAL");
+        assert_eq!(result.physical_root_id, "LEAF");
 
         assert_eq!(result.core_plan.planned_offsets, vec![600]);
 
-        assert_eq!(result.items[0].id, "ORDINAL");
+        assert_eq!(result.items[0].id, "LEAF");
         assert_eq!(result.items[0].offset, 0);
-        assert_eq!(result.items[1].id, "CASE");
+        assert_eq!(result.items[1].id, "NODE");
         assert_eq!(result.items[1].offset, 600);
     }
 
     #[test]
-    fn keeps_existing_case_subtree_together() {
-        let suitcase_txid = "a".repeat(64);
-        let case_txid = "b".repeat(64);
+    fn keeps_existing_subtree_together() {
+        let root_txid = "a".repeat(64);
+        let node_txid = "b".repeat(64);
 
         let mut specs = BTreeMap::new();
 
-        specs.insert("SUITCASE".to_string(), one_side_spec("+", 48));
+        specs.insert("ROOT".to_string(), one_side_spec("+", 48));
 
-        specs.insert("CASE".to_string(), one_side_spec("-", 1));
+        specs.insert("NODE".to_string(), one_side_spec("-", 1));
 
         let result = verify_compose(VerifyComposeRequest {
             intent: VerifyComposeNodeIntent {
-                id: "SUITCASE".to_string(),
+                id: "ROOT".to_string(),
                 direction: None,
                 children: vec![VerifyComposeNodeIntent {
-                    id: "CASE".to_string(),
+                    id: "NODE".to_string(),
                     direction: None,
                     children: vec![VerifyComposeNodeIntent {
-                        id: "ORDINAL".to_string(),
+                        id: "LEAF".to_string(),
                         direction: None,
                         children: vec![],
                     }],
                 }],
             },
             sources: vec![
-                source(&case_txid, 1146, vec![("ORDINAL", 0), ("CASE", 600)]),
-                source(&suitcase_txid, 546, vec![("SUITCASE", 0)]),
+                source(&node_txid, 1146, vec![("LEAF", 0), ("NODE", 600)]),
+                source(&root_txid, 546, vec![("ROOT", 0)]),
             ],
             specs,
             fee_rate: Some(1),
@@ -791,7 +791,7 @@ mod tests {
 
         let ids: Vec<String> = result.items.iter().map(|item| item.id.clone()).collect();
 
-        assert_eq!(ids, vec!["SUITCASE", "ORDINAL", "CASE"]);
+        assert_eq!(ids, vec!["ROOT", "LEAF", "NODE"]);
 
         assert_eq!(result.items[1].offset, 546);
         assert_eq!(result.items[2].offset, 1146);

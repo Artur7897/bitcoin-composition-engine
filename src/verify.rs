@@ -50,8 +50,8 @@ pub struct VerifiedGroup {
     /*
      * Semantischer Root dieser Gruppe.
      *
-     * Bei einem Case kann root_id beispielsweise
-     * die Case-ID sein, obwohl das enthaltene
+     * Der semantic root kann beispielsweise
+     * eine andere ID sein, obwohl das enthaltene
      * Ordinal physisch vor ihr liegt.
      */
     pub root_id: String,
@@ -694,7 +694,7 @@ mod tests {
         }
     }
 
-    fn case_spec(direction: &str) -> Value {
+    fn one_child_spec(direction: &str) -> Value {
         json!({
             "structure": {
                 "version": 1,
@@ -711,7 +711,7 @@ mod tests {
         })
     }
 
-    fn suitcase_spec() -> Value {
+    fn multi_child_spec() -> Value {
         json!({
             "structure": {
                 "version": 1,
@@ -731,19 +731,19 @@ mod tests {
     #[test]
     fn semantic_root_may_have_non_zero_offset() {
         let mut specs = BTreeMap::new();
-        specs.insert("CASE".to_string(), case_spec("-"));
+        specs.insert("NODE".to_string(), one_child_spec("-"));
 
         let result = verify_composition(VerifyCompositionRequest {
             utxo: Utxo {
                 outpoint: format!("{TXID}:0"),
                 value: 1146,
                 address: "bc1ptest".to_string(),
-                inscriptions: vec![inscription("ORDINAL", 0), inscription("CASE", 600)],
+                inscriptions: vec![inscription("LEAF", 0), inscription("NODE", 600)],
             },
             intent: VerifyNodeIntent {
-                id: "CASE".to_string(),
+                id: "NODE".to_string(),
                 children: vec![VerifyNodeIntent {
-                    id: "ORDINAL".to_string(),
+                    id: "LEAF".to_string(),
                     children: vec![],
                 }],
             },
@@ -751,22 +751,22 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(result.root_id, "CASE");
+        assert_eq!(result.root_id, "NODE");
         assert_eq!(result.items[1].offset, 600);
         assert_eq!(result.groups.len(), 2);
-        assert_eq!(result.groups[0].ids, vec!["ORDINAL"]);
-        assert_eq!(result.groups[1].ids, vec!["CASE"]);
+        assert_eq!(result.groups[0].ids, vec!["LEAF"]);
+        assert_eq!(result.groups[1].ids, vec!["NODE"]);
     }
 
     #[test]
-    fn nested_cases_become_contiguous_groups() {
+    fn nested_subtrees_become_contiguous_groups() {
         let mut specs = BTreeMap::new();
 
-        specs.insert("SUITCASE".to_string(), suitcase_spec());
+        specs.insert("ROOT".to_string(), multi_child_spec());
 
-        specs.insert("CASE-1".to_string(), case_spec("-"));
+        specs.insert("NODE-1".to_string(), one_child_spec("-"));
 
-        specs.insert("CASE-2".to_string(), case_spec("-"));
+        specs.insert("NODE-2".to_string(), one_child_spec("-"));
 
         let result = verify_composition(VerifyCompositionRequest {
             utxo: Utxo {
@@ -774,27 +774,27 @@ mod tests {
                 value: 2838,
                 address: "bc1ptest".to_string(),
                 inscriptions: vec![
-                    inscription("SUITCASE", 0),
-                    inscription("ORDINAL-1", 546),
-                    inscription("CASE-1", 1146),
-                    inscription("ORDINAL-2", 1692),
-                    inscription("CASE-2", 2292),
+                    inscription("ROOT", 0),
+                    inscription("LEAF-1", 546),
+                    inscription("NODE-1", 1146),
+                    inscription("LEAF-2", 1692),
+                    inscription("NODE-2", 2292),
                 ],
             },
             intent: VerifyNodeIntent {
-                id: "SUITCASE".to_string(),
+                id: "ROOT".to_string(),
                 children: vec![
                     VerifyNodeIntent {
-                        id: "CASE-1".to_string(),
+                        id: "NODE-1".to_string(),
                         children: vec![VerifyNodeIntent {
-                            id: "ORDINAL-1".to_string(),
+                            id: "LEAF-1".to_string(),
                             children: vec![],
                         }],
                     },
                     VerifyNodeIntent {
-                        id: "CASE-2".to_string(),
+                        id: "NODE-2".to_string(),
                         children: vec![VerifyNodeIntent {
-                            id: "ORDINAL-2".to_string(),
+                            id: "LEAF-2".to_string(),
                             children: vec![],
                         }],
                     },
@@ -806,30 +806,30 @@ mod tests {
 
         assert_eq!(result.groups.len(), 3);
 
-        assert_eq!(result.groups[1].ids, vec!["ORDINAL-1", "CASE-1"]);
+        assert_eq!(result.groups[1].ids, vec!["LEAF-1", "NODE-1"]);
 
         assert_eq!(result.groups[1].postage, 1146);
 
-        assert_eq!(result.groups[2].ids, vec!["ORDINAL-2", "CASE-2"]);
+        assert_eq!(result.groups[2].ids, vec!["LEAF-2", "NODE-2"]);
     }
 
     #[test]
     fn rejects_wrong_direction() {
         let mut specs = BTreeMap::new();
 
-        specs.insert("CASE".to_string(), case_spec("+"));
+        specs.insert("NODE".to_string(), one_child_spec("+"));
 
         let error = verify_composition(VerifyCompositionRequest {
             utxo: Utxo {
                 outpoint: format!("{TXID}:0"),
                 value: 1146,
                 address: "bc1ptest".to_string(),
-                inscriptions: vec![inscription("ORDINAL", 0), inscription("CASE", 600)],
+                inscriptions: vec![inscription("LEAF", 0), inscription("NODE", 600)],
             },
             intent: VerifyNodeIntent {
-                id: "CASE".to_string(),
+                id: "NODE".to_string(),
                 children: vec![VerifyNodeIntent {
-                    id: "ORDINAL".to_string(),
+                    id: "LEAF".to_string(),
                     children: vec![],
                 }],
             },
@@ -844,17 +844,17 @@ mod tests {
     fn rejects_missing_on_chain_id() {
         let mut specs = BTreeMap::new();
 
-        specs.insert("CASE".to_string(), case_spec("-"));
+        specs.insert("NODE".to_string(), one_child_spec("-"));
 
         let error = verify_composition(VerifyCompositionRequest {
             utxo: Utxo {
                 outpoint: format!("{TXID}:0"),
                 value: 1146,
                 address: "bc1ptest".to_string(),
-                inscriptions: vec![inscription("ORDINAL", 0), inscription("CASE", 600)],
+                inscriptions: vec![inscription("LEAF", 0), inscription("NODE", 600)],
             },
             intent: VerifyNodeIntent {
-                id: "CASE".to_string(),
+                id: "NODE".to_string(),
                 children: vec![VerifyNodeIntent {
                     id: "MISSING".to_string(),
                     children: vec![],
@@ -871,11 +871,11 @@ mod tests {
     fn rejects_interleaved_subtrees() {
         let mut specs = BTreeMap::new();
 
-        specs.insert("SUITCASE".to_string(), suitcase_spec());
+        specs.insert("ROOT".to_string(), multi_child_spec());
 
-        specs.insert("CASE-1".to_string(), case_spec("-"));
+        specs.insert("NODE-1".to_string(), one_child_spec("-"));
 
-        specs.insert("CASE-2".to_string(), case_spec("-"));
+        specs.insert("NODE-2".to_string(), one_child_spec("-"));
 
         let error = verify_composition(VerifyCompositionRequest {
             utxo: Utxo {
@@ -883,27 +883,27 @@ mod tests {
                 value: 2838,
                 address: "bc1ptest".to_string(),
                 inscriptions: vec![
-                    inscription("SUITCASE", 0),
-                    inscription("ORDINAL-1", 546),
-                    inscription("ORDINAL-2", 1146),
-                    inscription("CASE-1", 1746),
-                    inscription("CASE-2", 2292),
+                    inscription("ROOT", 0),
+                    inscription("LEAF-1", 546),
+                    inscription("LEAF-2", 1146),
+                    inscription("NODE-1", 1746),
+                    inscription("NODE-2", 2292),
                 ],
             },
             intent: VerifyNodeIntent {
-                id: "SUITCASE".to_string(),
+                id: "ROOT".to_string(),
                 children: vec![
                     VerifyNodeIntent {
-                        id: "CASE-1".to_string(),
+                        id: "NODE-1".to_string(),
                         children: vec![VerifyNodeIntent {
-                            id: "ORDINAL-1".to_string(),
+                            id: "LEAF-1".to_string(),
                             children: vec![],
                         }],
                     },
                     VerifyNodeIntent {
-                        id: "CASE-2".to_string(),
+                        id: "NODE-2".to_string(),
                         children: vec![VerifyNodeIntent {
-                            id: "ORDINAL-2".to_string(),
+                            id: "LEAF-2".to_string(),
                             children: vec![],
                         }],
                     },
@@ -920,19 +920,19 @@ mod tests {
     fn translates_verified_groups_for_core() {
         let mut specs = BTreeMap::new();
 
-        specs.insert("CASE".to_string(), case_spec("-"));
+        specs.insert("NODE".to_string(), one_child_spec("-"));
 
         let result = verify_composition(VerifyCompositionRequest {
             utxo: Utxo {
                 outpoint: format!("{TXID}:0"),
                 value: 1146,
                 address: "bc1ptest".to_string(),
-                inscriptions: vec![inscription("ORDINAL", 0), inscription("CASE", 600)],
+                inscriptions: vec![inscription("LEAF", 0), inscription("NODE", 600)],
             },
             intent: VerifyNodeIntent {
-                id: "CASE".to_string(),
+                id: "NODE".to_string(),
                 children: vec![VerifyNodeIntent {
-                    id: "ORDINAL".to_string(),
+                    id: "LEAF".to_string(),
                     children: vec![],
                 }],
             },
