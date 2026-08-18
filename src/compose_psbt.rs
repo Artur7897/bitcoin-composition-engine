@@ -4,9 +4,13 @@ use bitcoin::{
     absolute::LockTime, address::Address, psbt::Psbt, transaction::Version, Amount, Network,
     OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
 };
-use std::{collections::BTreeMap, str::FromStr};
+use std::{
+    collections::{BTreeMap, HashSet},
+    str::FromStr,
+};
 
 use crate::compose_types::{ComposeBuildPsbtRequest, ComposeBuildPsbtResponse};
+use crate::execution_guard::{validate_current_output, CurrentOutputState};
 use crate::fees::{estimate_network_fee, service_fee_sats, DUST_LIMIT, SERVICE_FEE_ADDRESS};
 use crate::models::Utxo;
 
@@ -15,29 +19,53 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
 
     let service_fee = service_fee_sats(req.payment_method.as_deref())?;
 
-    let root_utxo = build_utxo(
-        req.root_utxo.clone(),
+    /*
+     * Execution boundary:
+     *
+     * Request/plan values are never authoritative here.
+     * Every real transaction input is re-read from Bitcoin Core + ord
+     * immediately before PSBT construction.
+     */
+    let root_state = validate_current_output(&req.root_utxo)?;
+
+    validate_ordinal_source(
+        &root_state,
+        &req.root_id,
         req.root_postage,
-        req.ordinals_address.clone(),
+        &req.ordinals_address,
     )?;
 
-    let item_utxos: Vec<Utxo> = req
-        .items
-        .iter()
-        .map(|item| {
-            let outpoint = item
-                .utxo
-                .clone()
-                .ok_or_else(|| anyhow!("missing item UTXO for {}", item.id))?;
+    let root_utxo = current_output_to_utxo(&root_state, &req.ordinals_address)?;
 
-            build_utxo(outpoint, item.postage, req.ordinals_address.clone())
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut item_utxos = Vec::<Utxo>::with_capacity(req.items.len());
+
+    for item in &req.items {
+        let outpoint = item
+            .utxo
+            .as_deref()
+            .ok_or_else(|| anyhow!("missing item UTXO for {}", item.id))?;
+
+        let state = validate_current_output(outpoint)?;
+
+        validate_ordinal_source(&state, &item.id, item.postage, &req.ordinals_address)?;
+
+        item_utxos.push(current_output_to_utxo(&state, &req.ordinals_address)?);
+    }
+
+    let mut payment_utxos = Vec::<Utxo>::with_capacity(req.payment_utxos.len());
+
+    for requested in &req.payment_utxos {
+        let state = validate_current_output(&requested.outpoint)?;
+
+        validate_payment_source(&state, requested, &req.payment_address)?;
+
+        payment_utxos.push(current_output_to_utxo(&state, &req.payment_address)?);
+    }
 
     let mut all_utxos = Vec::<Utxo>::new();
     all_utxos.push(root_utxo.clone());
     all_utxos.extend(item_utxos.clone());
-    all_utxos.extend(req.payment_utxos.clone());
+    all_utxos.extend(payment_utxos.clone());
 
     let mut inputs = Vec::<TxIn>::new();
 
@@ -54,7 +82,7 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
         })?)
         .ok_or_else(|| anyhow!("composition value overflow"))?;
 
-    let payment_value = req.payment_utxos.iter().try_fold(0_u64, |total, utxo| {
+    let payment_value = payment_utxos.iter().try_fold(0_u64, |total, utxo| {
         total
             .checked_add(utxo.value)
             .ok_or_else(|| anyhow!("payment value overflow"))
@@ -163,15 +191,15 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
         .or_default()
         .extend(payment_indices);
 
-    let mut planned_offsets = Vec::<u64>::with_capacity(req.items.len());
+    let mut planned_offsets = Vec::<u64>::with_capacity(item_utxos.len());
 
-    let mut next_offset = req.root_postage;
+    let mut next_offset = root_utxo.value;
 
-    for item in &req.items {
+    for item_utxo in &item_utxos {
         planned_offsets.push(next_offset);
 
         next_offset = next_offset
-            .checked_add(item.postage)
+            .checked_add(item_utxo.value)
             .ok_or_else(|| anyhow!("compose offset overflow"))?;
     }
 
@@ -221,6 +249,28 @@ fn validate_request(req: &ComposeBuildPsbtRequest) -> Result<()> {
         bail!("missing payment UTXOs");
     }
 
+    /*
+     * Every inscription ID participating in the composition
+     * must be unique.
+     */
+    let mut seen_ids = HashSet::<String>::new();
+
+    if !seen_ids.insert(req.root_id.clone()) {
+        bail!("duplicate compose inscription ID: {}", req.root_id);
+    }
+
+    /*
+     * Every transaction input must reference a unique outpoint.
+     *
+     * This also prevents an ordinal UTXO from accidentally being
+     * reused as a payment UTXO.
+     */
+    let mut seen_outpoints = HashSet::<String>::new();
+
+    if !seen_outpoints.insert(req.root_utxo.clone()) {
+        bail!("duplicate compose input UTXO: {}", req.root_utxo);
+    }
+
     for item in &req.items {
         if item.id.trim().is_empty() {
             bail!("compose item contains empty ID");
@@ -230,18 +280,31 @@ fn validate_request(req: &ComposeBuildPsbtRequest) -> Result<()> {
             bail!("compose item {} has zero postage", item.id);
         }
 
-        if item
+        if !seen_ids.insert(item.id.clone()) {
+            bail!("duplicate compose inscription ID: {}", item.id);
+        }
+
+        let item_utxo = item
             .utxo
             .as_deref()
             .map(str::trim)
-            .map(|value| value.is_empty())
-            .unwrap_or(true)
-        {
-            bail!("missing item UTXO for {}", item.id);
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("missing item UTXO for {}", item.id))?;
+
+        if !seen_outpoints.insert(item_utxo.to_string()) {
+            bail!("duplicate compose input UTXO: {}", item_utxo);
         }
     }
 
     for payment_utxo in &req.payment_utxos {
+        if payment_utxo.outpoint.trim().is_empty() {
+            bail!("payment UTXO contains empty outpoint");
+        }
+
+        if payment_utxo.value == 0 {
+            bail!("payment UTXO has zero value");
+        }
+
         if payment_utxo.address != req.payment_address {
             bail!("payment UTXO address does not match payment address");
         }
@@ -249,22 +312,144 @@ fn validate_request(req: &ComposeBuildPsbtRequest) -> Result<()> {
         if !payment_utxo.inscriptions.is_empty() {
             bail!("payment UTXO contains inscriptions");
         }
+
+        if !seen_outpoints.insert(payment_utxo.outpoint.clone()) {
+            bail!("duplicate compose input UTXO: {}", payment_utxo.outpoint);
+        }
     }
 
     Ok(())
 }
 
-fn build_utxo(outpoint: String, value: u64, address: String) -> Result<Utxo> {
-    if value == 0 {
-        bail!("UTXO has zero value");
+fn current_output_to_utxo(state: &CurrentOutputState, expected_address: &str) -> Result<Utxo> {
+    let address = state
+        .address
+        .as_deref()
+        .ok_or_else(|| anyhow!("current output {} has no address", state.outpoint))?;
+
+    if address != expected_address {
+        bail!(
+            "current output {} address mismatch: expected {}, got {}",
+            state.outpoint,
+            expected_address,
+            address
+        );
+    }
+
+    /*
+     * The address representation must resolve to exactly the scriptPubKey
+     * reported by Bitcoin Core. This prevents address reconstruction from
+     * becoming a second source of truth.
+     */
+    let address_script = address_to_script(address)?;
+    let current_script = decode_hex(&state.script_pubkey)?;
+
+    if address_script.as_bytes() != current_script.as_slice() {
+        bail!(
+            "current output {} scriptPubKey does not match current address",
+            state.outpoint
+        );
+    }
+
+    if state.value == 0 {
+        bail!("current output {} has zero value", state.outpoint);
     }
 
     Ok(Utxo {
-        outpoint,
-        value,
-        address,
+        outpoint: state.outpoint.clone(),
+        value: state.value,
+        address: address.to_string(),
         inscriptions: Vec::new(),
     })
+}
+
+fn current_output_contains_id(state: &CurrentOutputState, id: &str) -> bool {
+    state
+        .satpoints
+        .iter()
+        .any(|satpoint| satpoint.ids.iter().any(|current| current == id))
+}
+
+fn validate_ordinal_source(
+    state: &CurrentOutputState,
+    expected_id: &str,
+    claimed_value: u64,
+    expected_address: &str,
+) -> Result<()> {
+    if !current_output_contains_id(state, expected_id) {
+        bail!(
+            "inscription {} is not present on current output {}",
+            expected_id,
+            state.outpoint
+        );
+    }
+
+    if state.value != claimed_value {
+        bail!(
+            "current output {} value mismatch: request claimed {}, Bitcoin has {}",
+            state.outpoint,
+            claimed_value,
+            state.value
+        );
+    }
+
+    let address = state
+        .address
+        .as_deref()
+        .ok_or_else(|| anyhow!("current output {} has no address", state.outpoint))?;
+
+    if address != expected_address {
+        bail!(
+            "current ordinal output {} address mismatch: expected {}, got {}",
+            state.outpoint,
+            expected_address,
+            address
+        );
+    }
+
+    Ok(())
+}
+
+fn validate_payment_source(
+    state: &CurrentOutputState,
+    requested: &Utxo,
+    expected_address: &str,
+) -> Result<()> {
+    if !state.satpoints.is_empty() {
+        bail!("payment UTXO {} contains inscriptions", state.outpoint);
+    }
+
+    if state.value != requested.value {
+        bail!(
+            "payment UTXO {} value mismatch: request claimed {}, Bitcoin has {}",
+            state.outpoint,
+            requested.value,
+            state.value
+        );
+    }
+
+    if requested.address != expected_address {
+        bail!(
+            "payment UTXO {} request address does not match payment address",
+            state.outpoint
+        );
+    }
+
+    let address = state
+        .address
+        .as_deref()
+        .ok_or_else(|| anyhow!("payment UTXO {} has no current address", state.outpoint))?;
+
+    if address != expected_address {
+        bail!(
+            "payment UTXO {} current address mismatch: expected {}, got {}",
+            state.outpoint,
+            expected_address,
+            address
+        );
+    }
+
+    Ok(())
 }
 
 fn build_txin(utxo: &Utxo) -> Result<TxIn> {
@@ -314,4 +499,59 @@ fn decode_hex(value: &str) -> Result<Vec<u8>> {
     }
 
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution_guard::CurrentSatpoint;
+
+    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
+
+    fn state(value: u64, ids: Vec<&str>) -> CurrentOutputState {
+        CurrentOutputState {
+            outpoint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0"
+                .to_string(),
+            value,
+            script_pubkey: String::new(),
+            address: Some(ADDRESS.to_string()),
+            satpoints: vec![CurrentSatpoint {
+                ids: ids.into_iter().map(str::to_string).collect(),
+                offset: 0,
+                postage: value,
+            }],
+        }
+    }
+
+    #[test]
+    fn rejects_claimed_value_mismatch() {
+        let current = state(1000, vec!["ID-A"]);
+
+        let error = validate_ordinal_source(&current, "ID-A", 546, ADDRESS)
+            .expect_err("mismatched claimed value must fail");
+
+        assert!(error
+            .to_string()
+            .contains("request claimed 546, Bitcoin has 1000"));
+    }
+
+    #[test]
+    fn rejects_missing_expected_inscription() {
+        let current = state(1000, vec!["ID-B"]);
+
+        let error = validate_ordinal_source(&current, "ID-A", 1000, ADDRESS)
+            .expect_err("missing expected inscription must fail");
+
+        assert!(error
+            .to_string()
+            .contains("is not present on current output"));
+    }
+
+    #[test]
+    fn accepts_expected_id_on_shared_satpoint() {
+        let current = state(1000, vec!["ID-A", "ID-B"]);
+
+        validate_ordinal_source(&current, "ID-A", 1000, ADDRESS)
+            .expect("expected ID on shared satpoint must remain valid");
+    }
 }

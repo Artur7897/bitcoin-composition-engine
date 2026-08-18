@@ -7,6 +7,7 @@ use bitcoin::{
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, str::FromStr};
 
+use crate::execution_guard::{validate_current_output, CurrentOutputState};
 use crate::extract::{
     run_extract_plan, ExtractGroup, ExtractPlanRequest, ExtractedOutputRef, RecomposeIntent,
 };
@@ -75,6 +76,29 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
         bail!("missing payment UTXOs");
     }
 
+    /*
+     * Execution boundary:
+     * Extract is executable only against current Bitcoin Core + ord state.
+     */
+    let current_input = validate_current_output(&req.input_utxo)?;
+
+    validate_extract_source(
+        &current_input,
+        req.total_value,
+        &req.groups,
+        &req.ordinals_address,
+    )?;
+
+    let mut payment_utxos = Vec::<Utxo>::with_capacity(req.payment_utxos.len());
+
+    for requested in &req.payment_utxos {
+        let current = validate_current_output(&requested.outpoint)?;
+
+        validate_payment_source(&current, requested, &req.payment_address)?;
+
+        payment_utxos.push(current_output_to_utxo(&current, &req.payment_address)?);
+    }
+
     let fee_rate = req.fee_rate.unwrap_or(1).max(1);
 
     let plan = run_extract_plan(ExtractPlanRequest {
@@ -87,14 +111,14 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
 
     let service_fee = service_fee_sats(req.payment_method.as_deref())?;
 
-    let payment_value = req.payment_utxos.iter().try_fold(0_u64, |total, utxo| {
+    let payment_value = payment_utxos.iter().try_fold(0_u64, |total, utxo| {
         total
             .checked_add(utxo.value)
             .ok_or_else(|| anyhow!("payment value overflow"))
     })?;
 
     let parent_input_count = 1_usize
-        .checked_add(req.payment_utxos.len())
+        .checked_add(payment_utxos.len())
         .ok_or_else(|| anyhow!("parent input count overflow"))?;
 
     let parent_output_count = plan
@@ -199,7 +223,7 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
      */
     inputs.push(build_txin(&req.input_utxo)?);
 
-    for payment_utxo in &req.payment_utxos {
+    for payment_utxo in &payment_utxos {
         inputs.push(build_txin(&payment_utxo.outpoint)?);
     }
 
@@ -216,8 +240,9 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
     let mut psbt = Psbt::from_unsigned_tx(tx)?;
 
     psbt.inputs[0].witness_utxo = Some(TxOut {
-        value: Amount::from_sat(req.total_value),
-        script_pubkey: address_to_script(&req.ordinals_address)?,
+        value: Amount::from_sat(current_input.value),
+        script_pubkey: ScriptBuf::from_hex(&current_input.script_pubkey)
+            .map_err(|_| anyhow!("invalid current input scriptPubKey"))?,
     });
 
     if req.ordinals_address.starts_with("bc1p") {
@@ -226,7 +251,7 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
         }
     }
 
-    for (payment_index, payment_utxo) in req.payment_utxos.iter().enumerate() {
+    for (payment_index, payment_utxo) in payment_utxos.iter().enumerate() {
         let psbt_index = payment_index
             .checked_add(1)
             .ok_or_else(|| anyhow!("payment input index overflow"))?;
@@ -253,7 +278,7 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
         .or_default()
         .push(0);
 
-    let payment_signing_indices: Vec<u32> = (1..=req.payment_utxos.len())
+    let payment_signing_indices: Vec<u32> = (1..=payment_utxos.len())
         .map(|index| u32::try_from(index).map_err(|_| anyhow!("payment signing index overflow")))
         .collect::<Result<Vec<_>>>()?;
 
@@ -267,7 +292,7 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
                 bail!("recompose requires a SegWit ordinals address");
             }
 
-            for payment_utxo in &req.payment_utxos {
+            for payment_utxo in &payment_utxos {
                 if !is_segwit_address(&payment_utxo.address) {
                     bail!("recompose requires SegWit payment inputs");
                 }
@@ -347,6 +372,158 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
     })
 }
 
+fn validate_extract_source(
+    state: &CurrentOutputState,
+    claimed_total: u64,
+    groups: &[ExtractGroup],
+    expected_address: &str,
+) -> Result<()> {
+    if state.value != claimed_total {
+        bail!(
+            "extract input {} value mismatch: request claimed {}, Bitcoin has {}",
+            state.outpoint,
+            claimed_total,
+            state.value
+        );
+    }
+
+    let address = state
+        .address
+        .as_deref()
+        .ok_or_else(|| anyhow!("extract input {} has no current address", state.outpoint))?;
+
+    if address != expected_address {
+        bail!(
+            "extract input {} address mismatch: expected {}, got {}",
+            state.outpoint,
+            expected_address,
+            address
+        );
+    }
+
+    for group in groups {
+        let end = group
+            .offset
+            .checked_add(group.postage)
+            .ok_or_else(|| anyhow!("extract group range overflow"))?;
+
+        if end > state.value {
+            bail!(
+                "extract group at offset {} exceeds current UTXO value {}",
+                group.offset,
+                state.value
+            );
+        }
+
+        for id in &group.ids {
+            let current_offset = state
+                .satpoints
+                .iter()
+                .find(|satpoint| satpoint.ids.iter().any(|current| current == id))
+                .map(|satpoint| satpoint.offset)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "extract inscription {} is not present on current output {}",
+                        id,
+                        state.outpoint
+                    )
+                })?;
+
+            if current_offset < group.offset || current_offset >= end {
+                bail!(
+                    "extract inscription {} moved: current offset {} is outside requested range {}..{}",
+                    id,
+                    current_offset,
+                    group.offset,
+                    end
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_payment_source(
+    state: &CurrentOutputState,
+    requested: &Utxo,
+    expected_address: &str,
+) -> Result<()> {
+    if !state.satpoints.is_empty() {
+        bail!("payment UTXO {} contains inscriptions", state.outpoint);
+    }
+
+    if state.value != requested.value {
+        bail!(
+            "payment UTXO {} value mismatch: request claimed {}, Bitcoin has {}",
+            state.outpoint,
+            requested.value,
+            state.value
+        );
+    }
+
+    if requested.address != expected_address {
+        bail!(
+            "payment UTXO {} request address does not match payment address",
+            state.outpoint
+        );
+    }
+
+    let address = state
+        .address
+        .as_deref()
+        .ok_or_else(|| anyhow!("payment UTXO {} has no current address", state.outpoint))?;
+
+    if address != expected_address {
+        bail!(
+            "payment UTXO {} current address mismatch: expected {}, got {}",
+            state.outpoint,
+            expected_address,
+            address
+        );
+    }
+
+    Ok(())
+}
+
+fn current_output_to_utxo(state: &CurrentOutputState, expected_address: &str) -> Result<Utxo> {
+    let address = state
+        .address
+        .as_deref()
+        .ok_or_else(|| anyhow!("current output {} has no address", state.outpoint))?;
+
+    if address != expected_address {
+        bail!(
+            "current output {} address mismatch: expected {}, got {}",
+            state.outpoint,
+            expected_address,
+            address
+        );
+    }
+
+    /*
+     * The address representation must resolve to exactly the scriptPubKey
+     * reported by Bitcoin Core. This prevents address reconstruction from
+     * becoming a second source of truth.
+     */
+    let address_script = address_to_script(address)?;
+    let current_script = decode_hex(&state.script_pubkey)?;
+
+    if address_script.as_bytes() != current_script.as_slice() {
+        bail!(
+            "current output {} scriptPubKey does not match current address",
+            state.outpoint
+        );
+    }
+
+    Ok(Utxo {
+        outpoint: state.outpoint.clone(),
+        value: state.value,
+        address: address.to_string(),
+        inscriptions: Vec::new(),
+    })
+}
+
 fn build_txin(outpoint: &str) -> Result<TxIn> {
     Ok(TxIn {
         previous_output: OutPoint::from_str(outpoint)?,
@@ -396,4 +573,99 @@ fn decode_hex(value: &str) -> Result<Vec<u8>> {
 
 fn is_segwit_address(address: &str) -> bool {
     address.to_ascii_lowercase().starts_with("bc1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution_guard::CurrentSatpoint;
+
+    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
+
+    fn state(value: u64, satpoints: Vec<(u64, Vec<&str>, u64)>) -> CurrentOutputState {
+        CurrentOutputState {
+            outpoint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0"
+                .to_string(),
+            value,
+            script_pubkey: String::new(),
+            address: Some(ADDRESS.to_string()),
+            satpoints: satpoints
+                .into_iter()
+                .map(|(offset, ids, postage)| CurrentSatpoint {
+                    ids: ids.into_iter().map(str::to_string).collect(),
+                    offset,
+                    postage,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn rejects_extract_total_value_mismatch() {
+        let current = state(1000, vec![(0, vec!["A"], 500), (500, vec!["B"], 500)]);
+
+        let groups = vec![
+            ExtractGroup {
+                ids: vec!["A".to_string()],
+                offset: 0,
+                postage: 500,
+            },
+            ExtractGroup {
+                ids: vec!["B".to_string()],
+                offset: 500,
+                postage: 500,
+            },
+        ];
+
+        let error = validate_extract_source(&current, 999, &groups, ADDRESS)
+            .expect_err("stale extract total must fail");
+
+        assert!(error
+            .to_string()
+            .contains("request claimed 999, Bitcoin has 1000"));
+    }
+
+    #[test]
+    fn rejects_inscription_outside_extract_range() {
+        let current = state(1000, vec![(0, vec!["A"], 700), (700, vec!["B"], 300)]);
+
+        let groups = vec![
+            ExtractGroup {
+                ids: vec!["A".to_string(), "B".to_string()],
+                offset: 0,
+                postage: 500,
+            },
+            ExtractGroup {
+                ids: vec!["C".to_string()],
+                offset: 500,
+                postage: 500,
+            },
+        ];
+
+        let error = validate_extract_source(&current, 1000, &groups, ADDRESS)
+            .expect_err("moved inscription must fail");
+
+        assert!(error.to_string().contains("outside requested range"));
+    }
+
+    #[test]
+    fn accepts_shared_satpoint_inside_extract_range() {
+        let current = state(1000, vec![(0, vec!["A", "B"], 500), (500, vec!["C"], 500)]);
+
+        let groups = vec![
+            ExtractGroup {
+                ids: vec!["A".to_string(), "B".to_string()],
+                offset: 0,
+                postage: 500,
+            },
+            ExtractGroup {
+                ids: vec!["C".to_string()],
+                offset: 500,
+                postage: 500,
+            },
+        ];
+
+        validate_extract_source(&current, 1000, &groups, ADDRESS)
+            .expect("shared satpoint must remain valid");
+    }
 }

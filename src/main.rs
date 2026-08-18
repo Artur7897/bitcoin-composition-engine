@@ -1,10 +1,12 @@
 use anyhow::{anyhow, Result};
 use std::{env, process};
 
+mod bitcoin_rpc;
 mod compose_broadcast;
 mod compose_plan;
 mod compose_psbt;
 mod compose_types;
+mod execution_guard;
 mod extract;
 mod extract_broadcast;
 mod extract_psbt;
@@ -45,6 +47,13 @@ fn main() {
     let payload_raw = &args[2];
 
     let result = match command.as_str() {
+        "inspect-current-state" => {
+            let req: Result<execution_guard::InspectCurrentStateRequest> = parse_json(payload_raw);
+
+            req.and_then(execution_guard::inspect_current_state)
+                .and_then(|v| serde_json::to_string_pretty(&v).map_err(Into::into))
+        }
+
         "compose-plan" => {
             let req: Result<ComposePlanRequest> = parse_json(payload_raw);
 

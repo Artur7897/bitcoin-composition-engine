@@ -6,12 +6,38 @@ use bitcoin::{
 };
 use std::{collections::BTreeMap, str::FromStr};
 
+use crate::execution_guard::{validate_current_output, CurrentOutputState};
 use crate::fees::{estimate_network_fee, service_fee_sats, DUST_LIMIT, SERVICE_FEE_ADDRESS};
 use crate::split_plan::run_split_plan;
-use crate::split_types::{SplitBuildPsbtRequest, SplitBuildPsbtResponse, SplitPlanRequest};
+use crate::split_types::{
+    PaymentUtxo, SplitBuildPsbtRequest, SplitBuildPsbtResponse, SplitGroup, SplitPlanRequest,
+};
 
 pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbtResponse> {
     validate_request(&req)?;
+
+    /*
+     * Execution boundary:
+     * Split is rebuilt only from current Bitcoin Core + ord state.
+     */
+    let current_input = validate_current_output(&req.input_utxo)?;
+
+    validate_split_source(
+        &current_input,
+        req.total_value,
+        &req.groups,
+        &req.ordinals_address,
+    )?;
+
+    let mut payment_utxos = Vec::<PaymentUtxo>::with_capacity(req.payment_utxos.len());
+
+    for requested in &req.payment_utxos {
+        let current = validate_current_output(&requested.outpoint)?;
+
+        validate_payment_source(&current, requested, &req.payment_address)?;
+
+        payment_utxos.push(current_output_to_payment(&current, &req.payment_address)?);
+    }
 
     let fee_rate = req.fee_rate.unwrap_or(1).max(1);
 
@@ -26,14 +52,14 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
         payment_method: req.payment_method.clone(),
     })?;
 
-    let payment_value = req.payment_utxos.iter().try_fold(0_u64, |total, utxo| {
+    let payment_value = payment_utxos.iter().try_fold(0_u64, |total, utxo| {
         total
             .checked_add(utxo.value)
             .ok_or_else(|| anyhow!("payment value overflow"))
     })?;
 
     let input_count = 1_usize
-        .checked_add(req.payment_utxos.len())
+        .checked_add(payment_utxos.len())
         .ok_or_else(|| anyhow!("split input count overflow"))?;
 
     /*
@@ -109,7 +135,7 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
      */
     inputs.push(build_txin(&req.input_utxo)?);
 
-    for payment_utxo in &req.payment_utxos {
+    for payment_utxo in &payment_utxos {
         inputs.push(build_txin(&payment_utxo.outpoint)?);
     }
 
@@ -125,8 +151,9 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
     let mut psbt = Psbt::from_unsigned_tx(tx)?;
 
     psbt.inputs[0].witness_utxo = Some(TxOut {
-        value: Amount::from_sat(req.total_value),
-        script_pubkey: address_to_script(&req.ordinals_address)?,
+        value: Amount::from_sat(current_input.value),
+        script_pubkey: ScriptBuf::from_hex(&current_input.script_pubkey)
+            .map_err(|_| anyhow!("invalid current input scriptPubKey"))?,
     });
 
     if req.ordinals_address.starts_with("bc1p") {
@@ -135,7 +162,7 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
         }
     }
 
-    for (payment_index, payment_utxo) in req.payment_utxos.iter().enumerate() {
+    for (payment_index, payment_utxo) in payment_utxos.iter().enumerate() {
         let psbt_index = payment_index
             .checked_add(1)
             .ok_or_else(|| anyhow!("payment input index overflow"))?;
@@ -185,6 +212,157 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
         outputs: plan.outputs.len(),
         tx_outputs,
         vsize,
+    })
+}
+
+fn validate_split_source(
+    state: &CurrentOutputState,
+    claimed_total: u64,
+    groups: &[SplitGroup],
+    expected_address: &str,
+) -> Result<()> {
+    if state.value != claimed_total {
+        bail!(
+            "split input {} value mismatch: request claimed {}, Bitcoin has {}",
+            state.outpoint,
+            claimed_total,
+            state.value
+        );
+    }
+
+    let address = state
+        .address
+        .as_deref()
+        .ok_or_else(|| anyhow!("split input {} has no current address", state.outpoint))?;
+
+    if address != expected_address {
+        bail!(
+            "split input {} address mismatch: expected {}, got {}",
+            state.outpoint,
+            expected_address,
+            address
+        );
+    }
+
+    for group in groups {
+        let end = group
+            .offset
+            .checked_add(group.value)
+            .ok_or_else(|| anyhow!("split group range overflow"))?;
+
+        if end > state.value {
+            bail!(
+                "split group at offset {} exceeds current UTXO value {}",
+                group.offset,
+                state.value
+            );
+        }
+
+        for id in &group.ids {
+            let current_offset = state
+                .satpoints
+                .iter()
+                .find(|satpoint| satpoint.ids.iter().any(|current| current == id))
+                .map(|satpoint| satpoint.offset)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "split inscription {} is not present on current output {}",
+                        id,
+                        state.outpoint
+                    )
+                })?;
+
+            if current_offset < group.offset || current_offset >= end {
+                bail!(
+                    "split inscription {} moved: current offset {} is outside requested range {}..{}",
+                    id,
+                    current_offset,
+                    group.offset,
+                    end
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_payment_source(
+    state: &CurrentOutputState,
+    requested: &PaymentUtxo,
+    expected_address: &str,
+) -> Result<()> {
+    if !state.satpoints.is_empty() {
+        bail!("payment UTXO {} contains inscriptions", state.outpoint);
+    }
+
+    if state.value != requested.value {
+        bail!(
+            "payment UTXO {} value mismatch: request claimed {}, Bitcoin has {}",
+            state.outpoint,
+            requested.value,
+            state.value
+        );
+    }
+
+    if requested.address != expected_address {
+        bail!("payment UTXO request address does not match payment address");
+    }
+
+    let address = state
+        .address
+        .as_deref()
+        .ok_or_else(|| anyhow!("payment UTXO {} has no current address", state.outpoint))?;
+
+    if address != expected_address {
+        bail!(
+            "payment UTXO {} current address mismatch: expected {}, got {}",
+            state.outpoint,
+            expected_address,
+            address
+        );
+    }
+
+    Ok(())
+}
+
+fn current_output_to_payment(
+    state: &CurrentOutputState,
+    expected_address: &str,
+) -> Result<PaymentUtxo> {
+    let address = state
+        .address
+        .as_deref()
+        .ok_or_else(|| anyhow!("payment UTXO {} has no current address", state.outpoint))?;
+
+    if address != expected_address {
+        bail!(
+            "payment UTXO {} address mismatch: expected {}, got {}",
+            state.outpoint,
+            expected_address,
+            address
+        );
+    }
+
+    /*
+     * The address representation must resolve to exactly the scriptPubKey
+     * reported by Bitcoin Core. This prevents address reconstruction from
+     * becoming a second source of truth.
+     */
+    let address_script = address_to_script(address)?;
+    let current_script = decode_hex(&state.script_pubkey)?;
+
+    if address_script.as_bytes() != current_script.as_slice() {
+        bail!(
+            "current output {} scriptPubKey does not match current address",
+            state.outpoint
+        );
+    }
+
+    Ok(PaymentUtxo {
+        outpoint: state.outpoint.clone(),
+        value: state.value,
+        address: address.to_string(),
     })
 }
 
@@ -273,4 +451,99 @@ fn decode_hex(value: &str) -> Result<Vec<u8>> {
     }
 
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution_guard::CurrentSatpoint;
+
+    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
+
+    fn state(value: u64, satpoints: Vec<(u64, Vec<&str>, u64)>) -> CurrentOutputState {
+        CurrentOutputState {
+            outpoint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0"
+                .to_string(),
+            value,
+            script_pubkey: String::new(),
+            address: Some(ADDRESS.to_string()),
+            satpoints: satpoints
+                .into_iter()
+                .map(|(offset, ids, postage)| CurrentSatpoint {
+                    ids: ids.into_iter().map(str::to_string).collect(),
+                    offset,
+                    postage,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn rejects_split_total_value_mismatch() {
+        let current = state(1000, vec![(0, vec!["A"], 500), (500, vec!["B"], 500)]);
+
+        let groups = vec![
+            SplitGroup {
+                ids: vec!["A".to_string()],
+                offset: 0,
+                value: 500,
+            },
+            SplitGroup {
+                ids: vec!["B".to_string()],
+                offset: 500,
+                value: 500,
+            },
+        ];
+
+        let error = validate_split_source(&current, 999, &groups, ADDRESS)
+            .expect_err("stale split total must fail");
+
+        assert!(error
+            .to_string()
+            .contains("request claimed 999, Bitcoin has 1000"));
+    }
+
+    #[test]
+    fn rejects_inscription_outside_requested_split_range() {
+        let current = state(1000, vec![(0, vec!["A"], 700), (700, vec!["B"], 300)]);
+
+        let groups = vec![
+            SplitGroup {
+                ids: vec!["A".to_string(), "B".to_string()],
+                offset: 0,
+                value: 500,
+            },
+            SplitGroup {
+                ids: vec!["C".to_string()],
+                offset: 500,
+                value: 500,
+            },
+        ];
+
+        let error = validate_split_source(&current, 1000, &groups, ADDRESS)
+            .expect_err("moved inscription must fail");
+
+        assert!(error.to_string().contains("outside requested range"));
+    }
+
+    #[test]
+    fn accepts_shared_satpoint_inside_split_range() {
+        let current = state(1000, vec![(0, vec!["A", "B"], 500), (500, vec!["C"], 500)]);
+
+        let groups = vec![
+            SplitGroup {
+                ids: vec!["A".to_string(), "B".to_string()],
+                offset: 0,
+                value: 500,
+            },
+            SplitGroup {
+                ids: vec!["C".to_string()],
+                offset: 500,
+                value: 500,
+            },
+        ];
+
+        validate_split_source(&current, 1000, &groups, ADDRESS)
+            .expect("shared satpoint must remain valid");
+    }
 }

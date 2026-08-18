@@ -1,6 +1,6 @@
-Bitcoin Composition Engine (BCE)
+# Bitcoin Composition Engine (BCE)
 
-BCE is a deterministic Bitcoin UTXO composition and verification
+Bitcoin Composition Engine (BCE) is a deterministic Bitcoin UTXO composition and verification
 engine written in Rust.
 
 It implements four operations:
@@ -96,7 +96,7 @@ cargo build
 
 The binary is created at:
 
-target/debug/ordifi-core
+target/debug/bce
 ## Test
 cargo fmt --check
 cargo check

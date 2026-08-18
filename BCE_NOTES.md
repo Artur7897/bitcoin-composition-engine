@@ -1,6 +1,6 @@
-# OrdiFi Core v2 Notes
+# Bitcoin Composition Engine (BCE) Notes
 
-OrdiFi Core v2 is the isolated release-candidate version of the OrdiFi
+Bitcoin Composition Engine (BCE) is the isolated release-candidate engine originally developed for OrdiFi
 transaction and verification engine.
 
 ## Environment
@@ -10,11 +10,11 @@ Production Core v1 remains untouched.
 The current webapp continues using:
 
 ```text
-/home/ordifiadmin/dev/ordifi-core/target/debug/ordifi-core
+/home/ordifiadmin/dev/bitcoin-composition-engine/target/debug/bce
 
 Core v2 lives in:
 
-/home/ordifiadmin/dev/ordifi-core-v2
+/home/ordifiadmin/dev/bitcoin-composition-engine
 
 Nothing in production may point to Core v2 until the API migration and real
 wallet end-to-end tests are completed explicitly.
