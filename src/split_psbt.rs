@@ -128,6 +128,23 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
         script_pubkey: address_to_script(&change_address)?,
     });
 
+    /*
+     * unsigned_txid is the Build -> Sign -> Broadcast commitment.
+     * All real inputs therefore have to be SegWit.
+     */
+    if !is_segwit_address(&req.ordinals_address) {
+        bail!("split broadcast commitment requires SegWit ordinal input");
+    }
+
+    for payment_utxo in &payment_utxos {
+        if !is_segwit_address(&payment_utxo.address) {
+            bail!(
+                "split broadcast commitment requires SegWit payment input {}",
+                payment_utxo.outpoint
+            );
+        }
+    }
+
     let mut inputs = Vec::<TxIn>::new();
 
     /*
@@ -147,6 +164,7 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
     };
 
     let tx_outputs = tx.output.len();
+    let unsigned_txid = tx.txid().to_string();
 
     let mut psbt = Psbt::from_unsigned_tx(tx)?;
 
@@ -205,6 +223,7 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
     Ok(SplitBuildPsbtResponse {
         ok: true,
         psbt: psbt_base64,
+        unsigned_txid,
         sign_inputs,
         network_fee,
         service_fee,
@@ -546,4 +565,8 @@ mod tests {
         validate_split_source(&current, 1000, &groups, ADDRESS)
             .expect("shared satpoint must remain valid");
     }
+}
+
+fn is_segwit_address(address: &str) -> bool {
+    address.to_ascii_lowercase().starts_with("bc1")
 }

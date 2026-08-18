@@ -67,6 +67,19 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
     all_utxos.extend(item_utxos.clone());
     all_utxos.extend(payment_utxos.clone());
 
+    /*
+     * unsigned_txid is used as the Build -> Sign -> Broadcast commitment.
+     * It remains stable through signing only for SegWit inputs.
+     */
+    for utxo in &all_utxos {
+        if !is_segwit_address(&utxo.address) {
+            bail!(
+                "compose broadcast commitment requires SegWit input {}",
+                utxo.outpoint
+            );
+        }
+    }
+
     let mut inputs = Vec::<TxIn>::new();
 
     for utxo in &all_utxos {
@@ -144,6 +157,8 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
         output: outputs,
     };
 
+    let unsigned_txid = tx.txid().to_string();
+
     let mut psbt = Psbt::from_unsigned_tx(tx)?;
 
     for (index, utxo) in all_utxos.iter().enumerate() {
@@ -212,6 +227,7 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
     Ok(ComposeBuildPsbtResponse {
         ok: true,
         psbt: psbt_base64,
+        unsigned_txid,
         sign_inputs,
         network_fee,
         service_fee,
@@ -554,4 +570,8 @@ mod tests {
         validate_ordinal_source(&current, "ID-A", 1000, ADDRESS)
             .expect("expected ID on shared satpoint must remain valid");
     }
+}
+
+fn is_segwit_address(address: &str) -> bool {
+    address.to_ascii_lowercase().starts_with("bc1")
 }

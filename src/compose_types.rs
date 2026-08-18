@@ -58,6 +58,7 @@ pub struct ComposeBuildPsbtRequest {
 pub struct ComposeBuildPsbtResponse {
     pub ok: bool,
     pub psbt: String,
+    pub unsigned_txid: String,
     pub sign_inputs: BTreeMap<String, Vec<u32>>,
     pub network_fee: u64,
     pub service_fee: u64,
@@ -70,6 +71,7 @@ pub struct ComposeBuildPsbtResponse {
 pub struct BroadcastRequest {
     pub signed_psbt: Option<String>,
     pub raw_tx: Option<String>,
+    pub expected_txid: String,
 }
 
 #[derive(Debug, Serialize)]
