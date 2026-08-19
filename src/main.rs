@@ -88,13 +88,6 @@ fn main() {
                 .and_then(|v| serde_json::to_string(&v).map_err(Into::into))
         }
 
-        "split-execute" => {
-            let req: Result<split_types::SplitBuildPsbtRequest> = parse_json(payload_raw);
-
-            req.and_then(split_psbt::run_split_build_psbt)
-                .and_then(|v| serde_json::to_string(&v).map_err(Into::into))
-        }
-
         "split-broadcast" => {
             let req: Result<split_types::SplitBroadcastRequest> = parse_json(payload_raw);
 

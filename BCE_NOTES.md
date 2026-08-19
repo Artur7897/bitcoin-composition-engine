@@ -1,27 +1,26 @@
 # Bitcoin Composition Engine (BCE) Notes
 
-Bitcoin Composition Engine (BCE) is the isolated release-candidate engine originally developed for OrdiFi
-transaction and verification engine.
+Bitcoin Composition Engine (BCE) is a deterministic Bitcoin UTXO composition and transaction engine.
+
+These notes describe implementation state, operational constraints and remaining integration work.
 
 ## Environment
 
-Production Core v1 remains untouched.
+Production integration remains separate from BCE development until explicit deployment approval.
 
-The current webapp continues using:
+BCE lives in:
 
-```text
-/home/ordifiadmin/dev/bitcoin-composition-engine/target/debug/bce
+    /home/ordifiadmin/dev/bitcoin-composition-engine
 
-Core v2 lives in:
+Current development binary:
 
-/home/ordifiadmin/dev/bitcoin-composition-engine
+    /home/ordifiadmin/dev/bitcoin-composition-engine/target/debug/bce
 
-Nothing in production may point to Core v2 until the API migration and real
-wallet end-to-end tests are completed explicitly.
+Production integration should not point to BCE until API migration and real wallet end-to-end tests are completed explicitly.
 
 ## Current status
 
-Core v2 implements the four deterministic UTXO operations:
+BCE implements the four deterministic UTXO operations:
 
 - Compose
 - Split
@@ -35,12 +34,12 @@ The verification boundary is integrated through:
 
 The complete automated suite currently passes:
 
-41 passed
+58 passed
 0 failed
 
 cargo check and cargo build complete without warnings or errors.
 
-Core v2 is functionally complete. Remaining work belongs to webapp integration,
+BCE is functionally complete at the engine level. Remaining work belongs to integration,
 wallet testing and controlled production migration.
 
 ## Architecture
@@ -280,19 +279,30 @@ There is no default postage.
 
 ## Known verification constraints
 
-The current structural verifier requires:
+The structural verifier currently requires:
 
-no two semantic nodes at the same offset
-every subtree to occupy a contiguous physical range
-a maximum semantic depth of level J
-explicit child direction when a Spec permits both + and -
-every Compose source UTXO to represent a complete semantic subtree
+- every verified subtree to occupy a contiguous physical range where contiguity is required
+- a maximum semantic depth of level J
+- explicit child direction when a Spec permits both + and -
+- every Compose source UTXO to represent a complete semantic subtree
 
-These constraints are intentional safety boundaries.
+Shared satpoints are valid Bitcoin state:
+
+    multiple inscription IDs
+    may share
+    one physical offset
+
+They must represent one physical position and one physical span while preserving all inscription identities.
+
+Verify supports shared-satpoint observations by preserving all observed inscription IDs while deriving physical value from distinct satpoint positions.
+
+Additional co-satpoint IDs do not automatically become semantic nodes.
+
+This behavior is covered by regression tests.
 
 ## Remaining integration work
 
-The Rust Core itself is complete.
+The BCE engine is functionally complete at the engine level. Remaining work is integration, deployment and real wallet end-to-end testing.
 
 Before production migration:
 
@@ -302,4 +312,4 @@ Before production migration:
 - test Compose, Split, Extract and Insert with real wallet signing
 - test dependent parent/child broadcasts end to end
 - confirm failure and rebroadcast behavior
-- switch production from Core v1 to Core v2 only after explicit approval
+- switch production integration to BCE only after explicit approval

@@ -152,9 +152,19 @@ pub fn verify_composition(req: VerifyCompositionRequest) -> Result<VerifyComposi
 
     flatten_intent(&req.intent, None, 0, &mut flat_intent)?;
 
-    let chain_items = build_chain_items(&req.utxo)?;
+    let observed_chain_items = build_chain_items(&req.utxo)?;
 
-    validate_same_ids(&flat_intent, &chain_items)?;
+    validate_same_ids(&flat_intent, &observed_chain_items)?;
+
+    let chain_items: Vec<ChainItem> = observed_chain_items
+        .iter()
+        .filter(|item| flat_intent.contains_key(&item.id))
+        .map(|item| ChainItem {
+            id: item.id.clone(),
+            offset: item.offset,
+            postage: item.postage,
+        })
+        .collect();
 
     let chain_index: HashMap<String, usize> = chain_items
         .iter()
@@ -289,22 +299,12 @@ fn build_chain_items(utxo: &Utxo) -> Result<Vec<ChainItem>> {
             );
         }
 
-        let end = match inscriptions.get(index + 1) {
-            Some(next) => {
-                if next.satpoint.offset == offset {
-                    bail!(
-                        "inscriptions {} and {} share offset {}; semantic direction is ambiguous",
-                        inscription.id,
-                        next.id,
-                        offset
-                    );
-                }
-
-                next.satpoint.offset
-            }
-
-            None => utxo.value,
-        };
+        let end = inscriptions
+            .iter()
+            .skip(index + 1)
+            .find(|next| next.satpoint.offset > offset)
+            .map(|next| next.satpoint.offset)
+            .unwrap_or(utxo.value);
 
         let postage = end
             .checked_sub(offset)
@@ -361,10 +361,23 @@ fn validate_same_ids(
         bail!("semantic IDs missing on-chain: {}", missing.join(", "));
     }
 
-    let unexpected: Vec<String> = chain_ids.difference(&intent_ids).cloned().collect();
+    let selected_offsets: HashSet<u64> = chain_items
+        .iter()
+        .filter(|item| intent.contains_key(&item.id))
+        .map(|item| item.offset)
+        .collect();
+
+    let unexpected: Vec<String> = chain_items
+        .iter()
+        .filter(|item| !intent.contains_key(&item.id) && !selected_offsets.contains(&item.offset))
+        .map(|item| item.id.clone())
+        .collect();
 
     if !unexpected.is_empty() {
-        bail!("unexpected on-chain IDs: {}", unexpected.join(", "));
+        bail!(
+            "unexpected on-chain IDs at unselected physical offsets: {}",
+            unexpected.join(", ")
+        );
     }
 
     Ok(())
@@ -947,5 +960,80 @@ mod tests {
         assert_eq!(split[0].value, 600);
         assert_eq!(extract[0].postage, 600);
         assert_eq!(insert[0].postage, 600);
+    }
+
+    #[test]
+    fn shared_satpoint_uses_one_physical_span() {
+        let utxo = Utxo {
+            outpoint: format!("{TXID}:0"),
+            value: 1546,
+            address: "bc1ptest".to_string(),
+            inscriptions: vec![
+                inscription("A", 0),
+                inscription("B", 0),
+                inscription("C", 1000),
+            ],
+        };
+
+        let items = build_chain_items(&utxo).unwrap();
+
+        assert_eq!(items.len(), 3);
+
+        assert_eq!(items[0].offset, 0);
+        assert_eq!(items[0].postage, 1000);
+
+        assert_eq!(items[1].offset, 0);
+        assert_eq!(items[1].postage, 1000);
+
+        assert_eq!(items[2].offset, 1000);
+        assert_eq!(items[2].postage, 546);
+    }
+
+    #[test]
+    fn co_satpoint_id_does_not_become_required_semantic_node() {
+        let mut intent = BTreeMap::new();
+
+        intent.insert(
+            "A".to_string(),
+            FlatIntentNode {
+                id: "A".to_string(),
+                parent_id: None,
+                depth: 0,
+                children: vec![],
+            },
+        );
+
+        let shared = vec![
+            ChainItem {
+                id: "A".to_string(),
+                offset: 0,
+                postage: 1000,
+            },
+            ChainItem {
+                id: "B".to_string(),
+                offset: 0,
+                postage: 1000,
+            },
+        ];
+
+        validate_same_ids(&intent, &shared).expect("co-satpoint inscription must be allowed");
+
+        let separate = vec![
+            ChainItem {
+                id: "A".to_string(),
+                offset: 0,
+                postage: 1000,
+            },
+            ChainItem {
+                id: "B".to_string(),
+                offset: 1000,
+                postage: 546,
+            },
+        ];
+
+        let error = validate_same_ids(&intent, &separate)
+            .expect_err("unselected physical position must fail");
+
+        assert!(error.to_string().contains("unselected physical offsets"));
     }
 }

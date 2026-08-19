@@ -57,7 +57,7 @@ between existing groups uses a split parent and composition child transaction.
 
 ## Verification
 
-Core v2 includes two verification commands:
+BCE includes two verification commands:
 
 verify-composition validates an existing composed UTXO.
 verify-compose validates a future semantic composition and compares it with
@@ -91,7 +91,7 @@ There is no default postage.
 Requirements:
 
 Rust stable toolchain
-Bitcoin Core CLI for finalization and broadcasting
+Bitcoin Core JSON-RPC access
 cargo build
 
 The binary is created at:
@@ -104,7 +104,7 @@ cargo test
 
 Current confirmed result:
 
-41 passed
+60 passed
 0 failed
 ## CLI commands
 compose-plan
@@ -113,7 +113,7 @@ compose-broadcast
 
 split-plan
 split-build-psbt
-split-execute
+split-build-psbt
 split-broadcast
 
 extract-plan
@@ -142,13 +142,11 @@ parent first
 child second
 ## Production status
 
-Core v1 remains the production engine.
-
-Core v2 must not replace Core v1 until:
+BCE should not be promoted to production deployment until:
 
 Extract and Insert webapp APIs are integrated
 all four operations are tested with real wallet signing
 dependent parent/child broadcasts are tested end to end
 migration is approved explicitly
 
-See CORE_V2_NOTES.md for detailed architectural and operational notes.
+See BCE_NOTES.md and the `docs/` directory for detailed architectural and operational documentation.
