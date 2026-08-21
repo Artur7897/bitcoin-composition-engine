@@ -25,10 +25,10 @@ pub struct VerifyCompositionRequest {
     pub intent: VerifyNodeIntent,
 
     /*
-     * Eingebettete Specs nach Inscription-ID.
+     * Embedded specs indexed by inscription ID.
      *
-     * Nur Nodes mit Children benötigen zwingend
-     * eine strukturelle Spec.
+     * Only nodes with children necessarily require
+     * a structural spec.
      */
     #[serde(default)]
     pub specs: BTreeMap<String, Value>,
@@ -48,16 +48,16 @@ pub struct VerifiedItem {
 #[serde(rename_all = "camelCase")]
 pub struct VerifiedGroup {
     /*
-     * Semantischer Root dieser Gruppe.
+     * Semantic root of this group.
      *
-     * Der semantic root kann beispielsweise
-     * eine andere ID sein, obwohl das enthaltene
-     * Ordinal physisch vor ihr liegt.
+     * The semantic root may, for example,
+     * be a different ID even though the contained
+     * ordinal physically precedes it.
      */
     pub root_id: String,
 
     /*
-     * IDs in zwingender physischer Sat-Reihenfolge.
+     * IDs in required physical sat order.
      */
     pub ids: Vec<String>,
 
@@ -76,13 +76,13 @@ pub struct VerifyCompositionResponse {
     pub total_value: u64,
 
     /*
-     * Einzelne On-Chain-Geometrie.
+     * Individual on-chain geometry.
      */
     pub items: Vec<VerifiedItem>,
 
     /*
-     * Semantische Top-Level-Gruppen,
-     * bereits in flache Core-Sprache übersetzt.
+     * Semantic top-level groups already translated
+     * into BCE's flat physical representation.
      */
     pub groups: Vec<VerifiedGroup>,
 }
@@ -175,9 +175,9 @@ pub fn verify_composition(req: VerifyCompositionRequest) -> Result<VerifyComposi
     let verified_items = build_verified_items(&flat_intent, &chain_items)?;
 
     /*
-     * Jeder Subtree muss einen zusammenhängenden
-     * physischen Bereich bilden. Nur dann kann
-     * Extract ihn deterministisch als Range behandeln.
+     * Every subtree must occupy a contiguous
+     * physical region. Only then can Extract
+     * treat it deterministically as a range.
      */
     for node_id in flat_intent.keys() {
         build_subtree_info(node_id, &flat_intent, &chain_items, &chain_index)?;

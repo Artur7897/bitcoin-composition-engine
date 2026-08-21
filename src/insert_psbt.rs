@@ -64,11 +64,11 @@ pub struct InsertBuildPsbtResponse {
     pub ok: bool,
     pub mode: InsertPlanMode,
 
-    /// Bei DirectAppend ist primary bereits die finale Insert-TX.
-    /// Bei SplitAndInsert wird primary später der Split-Parent.
+    /// For DirectAppend, primary is already the final insert transaction.
+    /// For SplitAndInsert, primary becomes the split parent transaction.
     pub primary: InsertPsbtTransaction,
 
-    /// Nur bei SplitAndInsert vorhanden.
+    /// Present only for SplitAndInsert.
     pub child: Option<InsertPsbtTransaction>,
 
     pub service_fee: u64,
@@ -207,9 +207,9 @@ fn build_direct_append_psbt(
     let mut inputs = Vec::<TxIn>::new();
 
     /*
-     * Inputs exakt in der vom Core berechneten finalen Reihenfolge:
+     * Inputs must follow the exact final order calculated by BCE:
      *
-     * bestehende Composition zuerst, danach Append-Gruppen.
+     * existing composition first, followed by append groups.
      */
     for child_input in &plan.child_inputs {
         let input_utxo = child_input
@@ -349,8 +349,8 @@ fn build_split_and_insert_psbts(
     }
 
     /*
-     * Der Child verwendet den unsignierten Parent-Txid.
-     * Deshalb müssen alle Parent-Inputs SegWit sein.
+     * The child uses the unsigned parent txid.
+     * Therefore all parent inputs must be SegWit.
      */
     if !is_segwit_address(&req.ordinals_address) {
         bail!("split_and_insert requires a SegWit ordinals address");
@@ -431,7 +431,7 @@ fn build_split_and_insert_psbts(
     let mut parent_inputs = Vec::<TxIn>::new();
 
     /*
-     * Bestehende Composition bleibt Parent-Input 0.
+     * The existing composition remains parent input 0.
      */
     parent_inputs.push(build_txin(&req.input_utxo)?);
 
@@ -442,8 +442,8 @@ fn build_split_and_insert_psbts(
     let mut parent_outputs = Vec::<TxOut>::new();
 
     /*
-     * Existing Runs müssen in ihrer ursprünglichen
-     * On-Chain-Reihenfolge ausgegeben werden.
+     * Existing runs must be emitted in their original
+     * on-chain order.
      */
     for run in &plan.existing_runs {
         parent_outputs.push(TxOut {
@@ -546,8 +546,8 @@ fn build_split_and_insert_psbts(
     let mut child_inputs = Vec::<TxIn>::new();
 
     /*
-     * Exakte, vom Core geplante Reihenfolge:
-     * Parent Runs und neue Insert-UTXOs werden interleaved.
+     * Exact order planned by BCE:
+     * parent runs and new insert UTXOs are interleaved.
      */
     for child_input in &plan.child_inputs {
         match child_input.kind {
@@ -579,7 +579,7 @@ fn build_split_and_insert_psbts(
     }
 
     /*
-     * Parent Payment Change kommt zuletzt.
+     * Parent payment change comes last.
      */
     child_inputs.push(TxIn {
         previous_output: OutPoint {

@@ -50,7 +50,7 @@ pub struct ExtractBuildPsbtResponse {
     pub ok: bool,
     pub psbt: String,
 
-    /// Txid der unsignierten SegWit-Parent-Transaktion.
+    /// Txid of the unsigned SegWit parent transaction.
     pub unsigned_txid: String,
     pub recompose_psbt: Option<ExtractRecomposePsbtResponse>,
     pub sign_inputs: BTreeMap<String, Vec<u32>>,
@@ -132,14 +132,14 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
         estimate_network_fee(parent_input_count, parent_output_count, fee_rate)?;
 
     /*
-     * Wenn Recompose erforderlich ist, verwendet die Child-Transaktion:
+     * When recompose is required, the child transaction uses:
      *
-     * - alle Remainder-Outputs des Parents
-     * - den Payment-Change-Output des Parents
+     * - all remainder outputs of the parent
+     * - the payment change output of the parent
      *
      * Outputs:
      * - recomposed Ordinal-UTXO
-     * - neuer Payment-Change
+     * - new payment change
      */
     let recompose_network_fee = match plan.recompose.as_ref() {
         Some(recompose) => {
@@ -166,9 +166,9 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
     }
 
     /*
-     * Der Parent bezahlt nur seine eigene Network Fee und die Service Fee.
-     * Die Child Fee bleibt zunächst im Parent-Change und wird erst von
-     * Recompose ausgegeben.
+     * The parent pays only its own network fee and the service fee.
+     * The child fee initially remains in the parent change and is only
+     * emitted by recompose.
      */
     let payment_change_value = payment_value
         .checked_sub(network_fee)
@@ -186,8 +186,8 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
     let mut outputs = Vec::<TxOut>::new();
 
     /*
-     * Diese Outputs müssen zuerst und exakt in der vom Core geplanten
-     * Sat-Reihenfolge erscheinen.
+     * These outputs must appear first and in the exact
+     * sat order planned by BCE.
      */
     for output in &plan.outputs {
         outputs.push(TxOut {
@@ -219,7 +219,7 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
     let mut inputs = Vec::<TxIn>::new();
 
     /*
-     * Der Composition-Input muss zwingend Input 0 bleiben.
+     * The composition input must remain input 0.
      */
     inputs.push(build_txin(&req.input_utxo)?);
 
@@ -285,8 +285,8 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
     let recompose_psbt = match plan.recompose.as_ref() {
         Some(recompose) => {
             /*
-             * Der Child-Txid darf aus dem unsignierten Parent nur dann
-             * abgeleitet werden, wenn alle Parent-Inputs SegWit verwenden.
+             * The child txid may be derived from the unsigned parent only
+             * when all parent inputs use SegWit.
              */
             if !is_segwit_address(&req.ordinals_address) {
                 bail!("recompose requires a SegWit ordinals address");
@@ -309,9 +309,9 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
                 ordinals_address: req.ordinals_address.clone(),
 
                 /*
-                 * Der Parent-Change gehört der Change-Adresse.
-                 * Deshalb muss diese Adresse den Payment-Input
-                 * der Child-Transaktion signieren.
+                 * The parent change belongs to the change address.
+                 * Therefore this address must control the payment input
+                 * used to sign the child transaction.
                  */
                 payment_signing_address: change_address.clone(),
                 change_address: change_address.clone(),

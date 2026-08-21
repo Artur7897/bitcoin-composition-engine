@@ -15,11 +15,10 @@ pub struct ExtractPlanRequest {
     pub ordinals_address: String,
     pub total_value: u64,
 
-    /// Vollständiger, von Verify übersetzter UTXO-Zustand.
+    /// Complete UTXO state translated by Verify.
     pub groups: Vec<ExtractGroup>,
 
-    /// Eine oder mehrere Gruppen, die jeweils als eigene UTXO
-    /// extrahiert werden sollen.
+    /// One or more groups to be extracted into separate UTXOs.
     pub extract_groups: Vec<Vec<String>>,
 }
 
@@ -35,10 +34,10 @@ pub struct ExtractOutput {
     pub kind: ExtractOutputKind,
     pub ids: Vec<String>,
 
-    /// Offset innerhalb der ursprünglichen Input-UTXO.
+    /// Offset within the original input UTXO.
     pub source_offset: u64,
 
-    /// Tatsächlicher Wert des Parent-Outputs.
+    /// Actual value of the parent output.
     pub value: u64,
 
     pub address: String,
@@ -54,10 +53,10 @@ pub struct ExtractedOutputRef {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RecomposeIntent {
-    /// Vout-Indizes aller Restbereiche der Parent-Transaktion.
+    /// Vout indices of all remainder regions in the parent transaction.
     pub input_output_indices: Vec<u32>,
 
-    /// Vom Core neu normalisierte Rest-Composition.
+    /// Remainder composition renormalized by BCE.
     pub groups: Vec<ExtractGroup>,
 
     pub total_value: u64,
@@ -69,13 +68,13 @@ pub struct ExtractPlanResponse {
     pub extractable: bool,
     pub input_utxo: String,
 
-    /// Parent-Outputs in zwingender Sat-Reihenfolge.
+    /// Parent outputs in required sat order.
     pub outputs: Vec<ExtractOutput>,
 
-    /// Konkrete Vout-Position jedes extrahierten Objekts.
+    /// Concrete vout position of each extracted object.
     pub extracted_outputs: Vec<ExtractedOutputRef>,
 
-    /// Nur vorhanden, wenn mehrere Restbereiche verbunden werden müssen.
+    /// Present only when multiple remainder regions must be recomposed.
     pub recompose: Option<RecomposeIntent>,
 }
 
@@ -93,9 +92,9 @@ pub fn run_extract_plan(req: ExtractPlanRequest) -> Result<ExtractPlanResponse> 
     let mut remainder_run = Vec::<ExtractGroup>::new();
 
     /*
-     * Die Parent-Outputs werden in der ursprünglichen Sat-Reihenfolge
-     * aufgebaut. Zusammenhängende Restgruppen werden zu einem Output
-     * gebündelt. Jede extrahierte Gruppe bleibt ein eigener Output.
+     * Parent outputs are built in the original sat order.
+     * Contiguous remainder groups are merged into one output.
+     * Each extracted group remains a separate output.
      */
     for (index, group) in groups.iter().enumerate() {
         if selected_indices.contains(&index) {

@@ -36,8 +36,8 @@ pub fn run_insert_broadcast(req: InsertBroadcastRequest) -> Result<InsertBroadca
     }
 
     /*
-     * Primary und Child werden vollständig finalisiert und
-     * kontrolliert, bevor irgendein Broadcast erfolgt.
+     * Primary and child transactions are fully finalized and
+     * verified before any transaction is broadcast.
      */
     let primary_raw = resolve_raw_tx(
         req.signed_primary_psbt.as_deref(),
@@ -172,10 +172,10 @@ fn verify_insert_child_dependency(decoded: &Value, primary_txid: &str) -> Result
         .ok_or_else(|| anyhow!("decoded insert child has no inputs"))?;
 
     /*
-     * SplitAndInsert besitzt mindestens:
-     * - zwei Existing-Run-Inputs aus dem Parent
-     * - einen Payment-Change-Input aus dem Parent
-     * - mindestens einen externen Insert-Input
+     * SplitAndInsert contains at least:
+     * - two existing-run inputs from the parent
+     * - a payment change input from the parent
+     * - at least one external insert input
      */
     let parent_input_count = inputs
         .iter()

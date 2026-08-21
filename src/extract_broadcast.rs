@@ -24,8 +24,8 @@ pub struct ExtractBroadcastResponse {
     pub recompose_txid: Option<String>,
     pub recompose_mempool_url: Option<String>,
 
-    /// Nur gesetzt, wenn Parent erfolgreich war,
-    /// aber Child nicht gesendet werden konnte.
+    /// Set only when the parent succeeded,
+    /// but the child transaction could not be broadcast.
     pub error: Option<String>,
 }
 

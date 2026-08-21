@@ -15,8 +15,8 @@ pub struct VerifyComposeNodeIntent {
     pub id: String,
 
     /*
-     * Nur notwendig, wenn die Parent-Spec
-     * sowohl + als auch - erlaubt.
+     * Required only when the parent spec
+     * allows both + and - directions.
      */
     #[serde(default)]
     pub direction: Option<Direction>,
@@ -44,14 +44,14 @@ pub struct VerifiedComposeInput {
     pub outpoint: String,
 
     /*
-     * IDs innerhalb dieses Inputs in ihrer
-     * bereits bestehenden Sat-Reihenfolge.
+     * IDs within this input in their
+     * already existing sat order.
      */
     pub ids: Vec<String>,
 
     /*
-     * Zukünftiger Offset dieses kompletten
-     * Inputs innerhalb der neuen UTXO.
+     * Future offset of this complete input
+     * within the new UTXO.
      */
     pub offset: u64,
 
@@ -82,8 +82,8 @@ pub struct VerifyComposeResponse {
     pub items: Vec<VerifiedComposeItem>,
 
     /*
-     * Tatsächlich vom bestehenden Core erzeugter Plan.
-     * Seine Offsets wurden gegen Verify verglichen.
+     * Plan produced independently by BCE.
+     * Its offsets are compared against the verified semantic intent.
      */
     pub core_plan: ComposePlanResponse,
 }
@@ -124,8 +124,8 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
     validate_source_ids(&req.sources, &flat)?;
 
     /*
-     * Die Spec-Sprache erzeugt die erwartete
-     * zukünftige physische ID-Reihenfolge.
+     * The spec language produces the expected
+     * future physical ID order.
      */
     let mut expected_ids = Vec::new();
 
@@ -134,8 +134,8 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
     validate_expected_ids(&expected_ids, &flat)?;
 
     /*
-     * Jede Source-UTXO wird unabhängig als bereits
-     * bestehender Zustand geprüft.
+     * Each source UTXO is independently verified as
+     * an already existing state.
      */
     let mut source_units = Vec::new();
 
@@ -213,8 +213,7 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
         .collect::<Result<Vec<_>>>()?;
 
     /*
-     * Hier baut der bestehende Core seinen Plan
-     * vollständig selbst.
+     * BCE builds the physical composition plan independently.
      */
     let core_plan = run_compose_plan(ComposePlanRequest {
         root_id: physical_root_id.clone(),
@@ -228,12 +227,12 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
         build_verified_result(&source_units)?;
 
     /*
-     * Erst nach dem unabhängigen Core-Build
-     * werden beide Ergebnisse verglichen.
+     * The independently built BCE plan is compared with
+     * the verified semantic result only after both are complete.
      */
     if core_plan.planned_offsets != expected_input_offsets {
         bail!(
-            "core compose offsets do not match verified intent: core {:?}, verify {:?}",
+            "BCE compose offsets do not match verified intent: BCE {:?}, verify {:?}",
             core_plan.planned_offsets,
             expected_input_offsets
         );
@@ -242,7 +241,7 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
     let actual_ids: Vec<String> = final_items.iter().map(|item| item.id.clone()).collect();
 
     if actual_ids != expected_ids {
-        bail!("core compose item order does not match semantic intent");
+        bail!("BCE compose item order does not match semantic intent");
     }
 
     Ok(VerifyComposeResponse {

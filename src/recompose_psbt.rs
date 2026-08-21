@@ -12,7 +12,7 @@ use crate::fees::{estimate_network_fee, DUST_LIMIT};
 pub struct RecomposeBuildRequest {
     pub parent_txid: String,
 
-    /// Ausschließlich die Ordinal-Outputs des Extract-Parents.
+    /// Contains only the ordinal outputs of the extract parent transaction.
     pub parent_outputs: Vec<ExtractOutput>,
 
     pub recompose: RecomposeIntent,
@@ -86,8 +86,8 @@ pub fn build_recompose_psbt(req: RecomposeBuildRequest) -> Result<RecomposeBuild
     let mut remainder_values = Vec::<u64>::new();
 
     /*
-     * Die Remainder-Inputs müssen zuerst und in Parent-vout-Reihenfolge
-     * erscheinen. Nur so bleiben ihre Sats in der richtigen Reihenfolge.
+     * Remainder inputs must appear first and in parent-vout order.
+     * Only then do their sats remain in the correct order.
      */
     for output_index in &req.recompose.input_output_indices {
         let parent_output = req
@@ -122,7 +122,7 @@ pub fn build_recompose_psbt(req: RecomposeBuildRequest) -> Result<RecomposeBuild
     }
 
     /*
-     * Payment Change kommt nach allen Ordinal-Inputs.
+     * Payment change comes after all ordinal inputs.
      */
     inputs.push(build_txin(OutPoint {
         txid: parent_txid,

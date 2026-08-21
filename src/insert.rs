@@ -22,14 +22,14 @@ pub struct InsertPlanRequest {
     pub ordinals_address: String,
     pub total_value: u64,
 
-    /// Aktueller, durch Verify bestätigter UTXO-Zustand.
+    /// Current UTXO state confirmed by Verify.
     pub existing_groups: Vec<ExistingInsertGroup>,
 
-    /// Eigenständige UTXOs, die eingefügt werden sollen.
+    /// Independent UTXOs to be inserted.
     pub insert_groups: Vec<NewInsertGroup>,
 
-    /// Von Verify übersetzte gewünschte Endreihenfolge.
-    /// Der Core kontrolliert Vollständigkeit und bestehende Reihenfolge.
+    /// Desired final order translated by Verify.
+    /// BCE validates completeness and preserves the existing order.
     pub ordered_groups: Vec<Vec<String>>,
 }
 
@@ -65,7 +65,7 @@ pub struct ExistingRun {
     pub source_offset: u64,
     pub value: u64,
 
-    /// Bei SplitAndInsert entspricht der Index dem Parent-vout.
+    /// For SplitAndInsert, the index corresponds to the parent vout.
     pub parent_output_index: Option<u32>,
 }
 
@@ -84,11 +84,11 @@ pub struct InsertChildInput {
     pub existing_run_index: Option<usize>,
     pub insert_index: Option<usize>,
 
-    /// Bei DirectAppend: bestehende Composition-UTXO.
-    /// Bei Inserted: neue einzufügende UTXO.
+    /// For DirectAppend: the existing composition UTXO.
+    /// For Inserted: the new UTXO to be inserted.
     pub input_utxo: Option<String>,
 
-    /// Bei SplitAndInsert: vout des Split-Parents.
+    /// For SplitAndInsert: vout of the split parent.
     pub parent_output_index: Option<u32>,
 }
 
@@ -102,13 +102,13 @@ pub struct InsertPlanResponse {
     pub current_total_value: u64,
     pub final_total_value: u64,
 
-    /// Zusammenhängende Bereiche der bestehenden Composition.
+    /// Contiguous regions of the existing composition.
     pub existing_runs: Vec<ExistingRun>,
 
-    /// Zwingende Input-Reihenfolge der finalen Insert-Transaktion.
+    /// Required input order of the final insert transaction.
     pub child_inputs: Vec<InsertChildInput>,
 
-    /// Vom Core neu berechnete finale UTXO-Geometrie.
+    /// Final UTXO geometry recalculated by BCE.
     pub final_groups: Vec<PlannedInsertGroup>,
 }
 

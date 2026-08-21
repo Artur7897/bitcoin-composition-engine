@@ -63,7 +63,7 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
         .ok_or_else(|| anyhow!("split input count overflow"))?;
 
     /*
-     * Gruppenoutputs + Service Fee + Change.
+     * Group outputs + service fee + change.
      */
     let output_count = plan
         .outputs
@@ -108,8 +108,7 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
     let mut outputs = Vec::<TxOut>::new();
 
     /*
-     * Die Split-Gruppen müssen zuerst und in Offset-Reihenfolge
-     * ausgegeben werden.
+     * Split groups must be emitted first and in offset order.
      */
     for group in &plan.outputs {
         outputs.push(TxOut {
@@ -148,7 +147,7 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
     let mut inputs = Vec::<TxIn>::new();
 
     /*
-     * Composition-Input bleibt zwingend Input 0.
+     * The composition input must remain input 0.
      */
     inputs.push(build_txin(&req.input_utxo)?);
 
