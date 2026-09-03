@@ -74,7 +74,6 @@ Planning determines:
 - ordered source inputs
 - resulting physical offsets
 - resulting output value
-- payment requirements
 - transaction structure
 
 Planning does not represent execution truth.

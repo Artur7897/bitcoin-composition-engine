@@ -89,6 +89,10 @@ It resolves:
 
 Verify produces the canonical physical representation required by BCE operations.
 
+Verify also preserves the normalized canonical grammar in `validatedSpecs`. This allows resolvers and interpreters to consume the verified structural information even though the Core operation layer does not use it.
+
+Application, presentation and other unrelated metadata are not included in `validatedSpecs`.
+
 It does not replace Bitcoin as execution truth.
 
 See:

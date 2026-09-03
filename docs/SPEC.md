@@ -211,7 +211,9 @@ into:
 - verified ranges
 - canonical offset and postage geometry
 
-BCE Core then operates only on the verified physical representation.
+The normalized canonical grammar is preserved in the verification response as `validatedSpecs`. This retains `version`, `rootLevel`, every structural relation, direction and `maxChildren` without forwarding application or presentation metadata.
+
+BCE Core then operates only on the verified physical representation. It does not consume `validatedSpecs`, but downstream resolvers and interpreters may do so.
 
 ## Separation of responsibilities
 

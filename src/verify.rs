@@ -85,6 +85,12 @@ pub struct VerifyCompositionResponse {
      * into BCE's flat physical representation.
      */
     pub groups: Vec<VerifiedGroup>,
+
+    /*
+     * Canonical structural specs belonging to the verified intent.
+     * Application and presentation metadata are intentionally excluded.
+     */
+    pub validated_specs: BTreeMap<String, StructuralSpec>,
 }
 
 impl VerifyCompositionResponse {
@@ -183,7 +189,9 @@ pub fn verify_composition(req: VerifyCompositionRequest) -> Result<VerifyComposi
         build_subtree_info(node_id, &flat_intent, &chain_items, &chain_index)?;
     }
 
-    validate_semantic_relations(&flat_intent, &chain_items, &chain_index, &req.specs)?;
+    let validated_specs = validate_structural_specs(&flat_intent, &req.specs)?;
+
+    validate_semantic_relations(&flat_intent, &chain_items, &chain_index, &validated_specs)?;
 
     let groups = build_core_groups(
         &req.intent.id,
@@ -201,6 +209,7 @@ pub fn verify_composition(req: VerifyCompositionRequest) -> Result<VerifyComposi
         total_value: req.utxo.value,
         items: verified_items,
         groups,
+        validated_specs,
     })
 }
 
@@ -405,24 +414,43 @@ fn build_verified_items(
         .collect()
 }
 
+fn validate_structural_specs(
+    intent: &BTreeMap<String, FlatIntentNode>,
+    raw_specs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, StructuralSpec>> {
+    let mut validated_specs = BTreeMap::new();
+
+    for node in intent.values() {
+        match raw_specs.get(&node.id) {
+            Some(value) => {
+                validated_specs.insert(node.id.clone(), read_structural_spec(value)?);
+            }
+            None if !node.children.is_empty() => {
+                bail!("node {} has children but no structural spec", node.id);
+            }
+            None => {}
+        }
+    }
+
+    Ok(validated_specs)
+}
+
 fn validate_semantic_relations(
     intent: &BTreeMap<String, FlatIntentNode>,
     chain_items: &[ChainItem],
     chain_index: &HashMap<String, usize>,
-    specs: &BTreeMap<String, Value>,
+    specs: &BTreeMap<String, StructuralSpec>,
 ) -> Result<()> {
     for node in intent.values() {
         if node.children.is_empty() {
             continue;
         }
 
-        let spec_value = specs
+        let spec = specs
             .get(&node.id)
             .ok_or_else(|| anyhow!("node {} has children but no structural spec", node.id))?;
 
-        let spec = read_structural_spec(spec_value)?;
-
-        validate_node_children(node, &spec, intent, chain_items, chain_index)?;
+        validate_node_children(node, spec, intent, chain_items, chain_index)?;
     }
 
     Ok(())
@@ -744,7 +772,12 @@ mod tests {
     #[test]
     fn semantic_root_may_have_non_zero_offset() {
         let mut specs = BTreeMap::new();
-        specs.insert("NODE".to_string(), one_child_spec("-"));
+        let mut node_spec = one_child_spec("-");
+
+        node_spec["application"] = json!({"name": "ignored"});
+        node_spec["presentation"] = json!({"component": "ignored"});
+
+        specs.insert("NODE".to_string(), node_spec);
 
         let result = verify_composition(VerifyCompositionRequest {
             utxo: Utxo {
@@ -769,6 +802,28 @@ mod tests {
         assert_eq!(result.groups.len(), 2);
         assert_eq!(result.groups[0].ids, vec!["LEAF"]);
         assert_eq!(result.groups[1].ids, vec!["NODE"]);
+
+        let validated = serde_json::to_value(
+            result
+                .validated_specs
+                .get("NODE")
+                .expect("validated NODE spec must be preserved"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            validated,
+            json!({
+                "version": 1,
+                "rootLevel": "A",
+                "relations": [{
+                    "parentLevel": "A",
+                    "childLevel": "B",
+                    "direction": "-",
+                    "maxChildren": 1
+                }]
+            })
+        );
     }
 
     #[test]

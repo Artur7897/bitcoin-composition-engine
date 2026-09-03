@@ -88,8 +88,6 @@ Planning may include:
 - ordered composition inputs
 - source values
 - physical output structure
-- payment requirements
-- fee calculation
 
 A plan is not execution truth.
 
@@ -122,7 +120,6 @@ It determines:
 - output ranges
 - output values
 - transaction structure
-- payment requirements
 
 The plan does not replace current execution-state validation.
 
@@ -148,7 +145,6 @@ Planning determines:
 - extracted outputs
 - remainder runs
 - whether a Recompose child is required
-- payment requirements
 - parent and dependent transaction structure
 
 ## extract-build-psbt
@@ -214,6 +210,8 @@ Verification may evaluate:
 - nested subtree structure
 - physical boundaries
 
+Successful output includes `items`, physical `groups` and `validatedSpecs`. The latter contains only normalized canonical structural fields.
+
 It does not perform transaction execution.
 
 ## verify-compose
@@ -221,6 +219,8 @@ It does not perform transaction execution.
 `verify-compose` verifies intended Compose structure before physical transaction construction.
 
 It validates whether the requested semantic structure can be translated unambiguously into valid physical composition geometry.
+
+Successful output preserves the aggregated normalized Structural Specs as `validatedSpecs`, even though the Compose planning layer uses only the derived physical geometry.
 
 ## Planning versus execution
 

@@ -163,7 +163,6 @@ Insert planning determines:
 - whether Split and Insert is required
 - parent transaction structure
 - child transaction structure where required
-- payment requirements
 
 Planning does not represent execution truth.
 

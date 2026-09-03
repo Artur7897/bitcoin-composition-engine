@@ -117,7 +117,6 @@ Planning determines:
 - verified group ranges
 - resulting output ordering
 - resulting output values
-- payment requirements
 - transaction structure
 
 Planning is not execution truth.

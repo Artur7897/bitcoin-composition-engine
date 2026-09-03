@@ -30,7 +30,9 @@ It compares:
 - physical boundaries
 - subtree structure
 
-The result is a verified physical representation of the existing composition.
+The result contains both the verified physical representation and the normalized canonical Structural Specs in `validatedSpecs`.
+
+The Core operations consume the physical representation. Resolvers and interpreters may consume `validatedSpecs`; BCE does not discard it merely because the Core does not use it.
 
 ### verify-compose
 
