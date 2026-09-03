@@ -415,7 +415,7 @@ mod tests {
         ExtractPlanRequest {
             input_utxo: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0"
                 .to_string(),
-            ordinals_address: "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz".to_string(),
+            ordinals_address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4".to_string(),
             total_value: 2646,
             groups: vec![
                 ExtractGroup {

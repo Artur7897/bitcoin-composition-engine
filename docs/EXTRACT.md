@@ -276,9 +276,8 @@ Extract is one high-level operation.
 
 If a Recompose child is required, the operation still represents one Extract request.
 
-Network fees reflect the actual parent and child transaction structures.
+The caller supplies `primary_miner_fee_sats` for the parent. When Recompose is required, the caller also supplies `recompose_miner_fee_sats`. BCE does not estimate either fee; it only reserves the exact supplied amounts while calculating payment change.
 
-Service-fee policy is independent of the number of internal dependent transactions.
 
 ## Result
 

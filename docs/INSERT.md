@@ -291,9 +291,8 @@ Insert is one high-level operation.
 
 A Split-and-Insert flow may contain parent and child transactions, but it remains one logical Insert request.
 
-Network fees reflect the actual transactions required.
+The caller supplies `primary_miner_fee_sats`. Split-and-Insert additionally requires `secondary_miner_fee_sats`; Direct Append rejects a secondary fee. BCE does not estimate either fee and uses the supplied amounts only to calculate payment change.
 
-Service-fee policy is independent of the number of dependent internal transactions.
 
 ## Result
 

@@ -72,19 +72,13 @@ direction + and -
 multiple directional spaces
 nested contiguous subtrees
 deterministic capacity limits
-legacy Case, Grid, Album and Suitcase templates
 ## Fees
 
-Every high-level operation charges one fixed service fee:
+BCE does not estimate or select miner fees.
 
-1500 sats
+PSBT build requests receive explicit absolute miner fee amounts in sats from the caller. BCE uses those amounts only to preserve input/output value balance and calculate payment change. Planning and verification are fee-independent.
 
-Network fees are calculated separately from transaction input and output counts.
-
-Credits are reserved for future use but are not implemented. Credit payment
-requests are rejected.
-
-There is no default postage.
+There is no BCE service fee and no default postage.
 
 ## Build
 

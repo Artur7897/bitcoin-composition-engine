@@ -187,7 +187,7 @@ For ordinal-bearing composition geometry:
 
 BCE may change which output contains a physical span, but not the value of that span.
 
-Network fees and service fees are accounted for separately from ordinal-bearing physical geometry.
+Network fees are accounted for separately from ordinal-bearing physical geometry.
 
 ## Why postage is fundamental
 

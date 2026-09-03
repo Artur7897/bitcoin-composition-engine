@@ -271,10 +271,13 @@ No earlier application state is accepted as physical execution truth.
 
 BCE separates composition geometry from transaction funding.
 
+Planning and verification do not estimate or select miner fees. PSBT build requests receive explicit absolute miner fee amounts in sats from the caller. BCE uses those amounts only when balancing transaction inputs, outputs, and payment change.
+
+For parent-child flows, the caller supplies a separate miner fee for each transaction. BCE does not derive a fee rate, estimate virtual size, or impose a minimum miner fee.
+
 Ordinal-bearing physical spans are preserved independently from:
 
-- network fees
-- service fees
+- caller-selected miner fees
 - payment change
 
 Payment inputs are validated separately and must not contain inscriptions.

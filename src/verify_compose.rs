@@ -33,9 +33,6 @@ pub struct VerifyComposeRequest {
 
     #[serde(default)]
     pub specs: BTreeMap<String, Value>,
-
-    pub fee_rate: Option<u64>,
-    pub payment_method: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -219,8 +216,6 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
         root_id: physical_root_id.clone(),
         root_postage,
         items: compose_items,
-        fee_rate: req.fee_rate,
-        payment_method: req.payment_method,
     })?;
 
     let (ordered_inputs, final_items, expected_input_offsets, total_value) =
@@ -736,8 +731,6 @@ mod tests {
                 source(&child_txid, 600, vec![("LEAF", 0)]),
             ],
             specs,
-            fee_rate: Some(1),
-            payment_method: Some("bitcoin".to_string()),
         })
         .unwrap();
 
@@ -781,8 +774,6 @@ mod tests {
                 source(&root_txid, 546, vec![("ROOT", 0)]),
             ],
             specs,
-            fee_rate: Some(1),
-            payment_method: Some("bitcoin".to_string()),
         })
         .unwrap();
 
@@ -842,8 +833,6 @@ mod tests {
                 source(&child_txid, 600, vec![("CHILD", 0)]),
             ],
             specs,
-            fee_rate: Some(1),
-            payment_method: Some("bitcoin".to_string()),
         })
         .err()
         .expect("ambiguous direction must fail");

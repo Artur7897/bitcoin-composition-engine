@@ -11,13 +11,11 @@ use std::{
 
 use crate::compose_types::{ComposeBuildPsbtRequest, ComposeBuildPsbtResponse};
 use crate::execution_guard::{validate_current_output, CurrentOutputState};
-use crate::fees::{estimate_network_fee, service_fee_sats, DUST_LIMIT, SERVICE_FEE_ADDRESS};
+use crate::fees::DUST_LIMIT;
 use crate::models::Utxo;
 
 pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBuildPsbtResponse> {
     validate_request(&req)?;
-
-    let service_fee = service_fee_sats(req.payment_method.as_deref())?;
 
     /*
      * Execution boundary:
@@ -101,11 +99,10 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
             .ok_or_else(|| anyhow!("payment value overflow"))
     })?;
 
-    let (vsize, network_fee) = estimate_network_fee(inputs.len(), 3, req.fee_rate.unwrap_or(1))?;
+    let miner_fee_sats = req.miner_fee_sats;
 
-    let required_payment = network_fee
-        .checked_add(service_fee)
-        .and_then(|value| value.checked_add(DUST_LIMIT))
+    let required_payment = miner_fee_sats
+        .checked_add(DUST_LIMIT)
         .ok_or_else(|| anyhow!("required payment overflow"))?;
 
     if payment_value < required_payment {
@@ -117,8 +114,7 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
     }
 
     let change_value = payment_value
-        .checked_sub(network_fee)
-        .and_then(|value| value.checked_sub(service_fee))
+        .checked_sub(miner_fee_sats)
         .ok_or_else(|| anyhow!("invalid payment change"))?;
 
     if change_value < DUST_LIMIT {
@@ -139,10 +135,6 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
         TxOut {
             value: Amount::from_sat(ordinals_value),
             script_pubkey: address_to_script(&receive_address)?,
-        },
-        TxOut {
-            value: Amount::from_sat(service_fee),
-            script_pubkey: address_to_script(SERVICE_FEE_ADDRESS)?,
         },
         TxOut {
             value: Amount::from_sat(change_value),
@@ -218,20 +210,12 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
             .ok_or_else(|| anyhow!("compose offset overflow"))?;
     }
 
-    let total = network_fee
-        .checked_add(service_fee)
-        .ok_or_else(|| anyhow!("total fee overflow"))?;
-
-    let _ = vsize;
-
     Ok(ComposeBuildPsbtResponse {
         ok: true,
         psbt: psbt_base64,
         unsigned_txid,
         sign_inputs,
-        network_fee,
-        service_fee,
-        total,
+        miner_fee_sats,
         planned_offsets,
     })
 }
@@ -522,7 +506,7 @@ mod tests {
     use super::*;
     use crate::execution_guard::CurrentSatpoint;
 
-    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
+    const ADDRESS: &str = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
 
     fn state(value: u64, ids: Vec<&str>) -> CurrentOutputState {
         CurrentOutputState {

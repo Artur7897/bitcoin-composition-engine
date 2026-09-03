@@ -19,19 +19,14 @@ pub struct SplitGroup {
 pub struct SplitPlanRequest {
     pub input_utxo: String,
     pub ordinals_address: String,
-    pub fee_rate: Option<u64>,
     pub total_value: u64,
     pub groups: Vec<SplitGroup>,
-    pub payment_method: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct SplitPlanResponse {
     pub ok: bool,
     pub splittable: bool,
-    pub network_fee: u64,
-    pub service_fee: u64,
-    pub total: u64,
     pub outputs: Vec<SplitGroup>,
     pub output_count: usize,
 }
@@ -45,8 +40,7 @@ pub struct SplitBuildPsbtRequest {
     pub change_address: Option<String>,
     pub ordinals_public_key: Option<String>,
     pub payment_public_key: Option<String>,
-    pub fee_rate: Option<u64>,
-    pub payment_method: Option<String>,
+    pub miner_fee_sats: u64,
     pub total_value: u64,
     pub groups: Vec<SplitGroup>,
     pub payment_utxos: Vec<PaymentUtxo>,
@@ -58,12 +52,9 @@ pub struct SplitBuildPsbtResponse {
     pub psbt: String,
     pub unsigned_txid: String,
     pub sign_inputs: BTreeMap<String, Vec<u32>>,
-    pub network_fee: u64,
-    pub service_fee: u64,
-    pub total: u64,
+    pub miner_fee_sats: u64,
     pub outputs: usize,
     pub tx_outputs: usize,
-    pub vsize: u64,
 }
 
 #[derive(Debug, Deserialize)]

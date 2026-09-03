@@ -11,17 +11,16 @@ use crate::execution_guard::{validate_current_output, CurrentOutputState};
 use crate::extract::{
     run_extract_plan, ExtractGroup, ExtractPlanRequest, ExtractedOutputRef, RecomposeIntent,
 };
-use crate::fees::{estimate_network_fee, service_fee_sats, DUST_LIMIT, SERVICE_FEE_ADDRESS};
+use crate::fees::DUST_LIMIT;
 use crate::models::Utxo;
-use crate::recompose_psbt::{build_recompose_psbt, estimate_recompose_fee, RecomposeBuildRequest};
+use crate::recompose_psbt::{build_recompose_psbt, RecomposeBuildRequest};
 
 #[derive(Debug, Serialize)]
 pub struct ExtractRecomposePsbtResponse {
     pub psbt: String,
     pub unsigned_txid: String,
     pub sign_inputs: BTreeMap<String, Vec<u32>>,
-    pub network_fee: u64,
-    pub vsize: u64,
+    pub miner_fee_sats: u64,
     pub change_output_index: u32,
     pub change_value: u64,
 }
@@ -41,8 +40,8 @@ pub struct ExtractBuildPsbtRequest {
     pub extract_groups: Vec<Vec<String>>,
 
     pub payment_utxos: Vec<Utxo>,
-    pub fee_rate: Option<u64>,
-    pub payment_method: Option<String>,
+    pub primary_miner_fee_sats: u64,
+    pub recompose_miner_fee_sats: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,12 +54,10 @@ pub struct ExtractBuildPsbtResponse {
     pub recompose_psbt: Option<ExtractRecomposePsbtResponse>,
     pub sign_inputs: BTreeMap<String, Vec<u32>>,
 
-    pub network_fee: u64,
-    pub recompose_network_fee: u64,
-    pub service_fee: u64,
-    pub total: u64,
+    pub miner_fee_sats: u64,
+    pub recompose_miner_fee_sats: u64,
+    pub total_miner_fee_sats: u64,
 
-    pub vsize: u64,
     pub ordinal_outputs: usize,
     pub tx_outputs: usize,
 
@@ -99,8 +96,6 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
         payment_utxos.push(current_output_to_utxo(&current, &req.payment_address)?);
     }
 
-    let fee_rate = req.fee_rate.unwrap_or(1).max(1);
-
     let plan = run_extract_plan(ExtractPlanRequest {
         input_utxo: req.input_utxo.clone(),
         ordinals_address: req.ordinals_address.clone(),
@@ -109,27 +104,13 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
         extract_groups: req.extract_groups.clone(),
     })?;
 
-    let service_fee = service_fee_sats(req.payment_method.as_deref())?;
-
     let payment_value = payment_utxos.iter().try_fold(0_u64, |total, utxo| {
         total
             .checked_add(utxo.value)
             .ok_or_else(|| anyhow!("payment value overflow"))
     })?;
 
-    let parent_input_count = 1_usize
-        .checked_add(payment_utxos.len())
-        .ok_or_else(|| anyhow!("parent input count overflow"))?;
-
-    let parent_output_count = plan
-        .outputs
-        .len()
-        .checked_add(if service_fee > 0 { 1 } else { 0 })
-        .and_then(|count| count.checked_add(1))
-        .ok_or_else(|| anyhow!("parent output count overflow"))?;
-
-    let (parent_vsize, network_fee) =
-        estimate_network_fee(parent_input_count, parent_output_count, fee_rate)?;
+    let miner_fee_sats = req.primary_miner_fee_sats;
 
     /*
      * When recompose is required, the child transaction uses:
@@ -141,19 +122,11 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
      * - recomposed Ordinal-UTXO
      * - new payment change
      */
-    let recompose_network_fee = match plan.recompose.as_ref() {
-        Some(recompose) => {
-            let (_, fee) = estimate_recompose_fee(recompose.input_output_indices.len(), fee_rate)?;
+    let recompose_miner_fee_sats =
+        resolve_recompose_miner_fee(plan.recompose.is_some(), req.recompose_miner_fee_sats)?;
 
-            fee
-        }
-
-        None => 0,
-    };
-
-    let required_payment = network_fee
-        .checked_add(recompose_network_fee)
-        .and_then(|value| value.checked_add(service_fee))
+    let required_payment = miner_fee_sats
+        .checked_add(recompose_miner_fee_sats)
         .and_then(|value| value.checked_add(DUST_LIMIT))
         .ok_or_else(|| anyhow!("required payment overflow"))?;
 
@@ -166,16 +139,15 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
     }
 
     /*
-     * The parent pays only its own network fee and the service fee.
+     * The parent pays only its own network fee.
      * The child fee initially remains in the parent change and is only
      * emitted by recompose.
      */
     let payment_change_value = payment_value
-        .checked_sub(network_fee)
-        .and_then(|value| value.checked_sub(service_fee))
+        .checked_sub(miner_fee_sats)
         .ok_or_else(|| anyhow!("invalid parent payment change"))?;
 
-    if plan.recompose.is_some() && payment_change_value < recompose_network_fee + DUST_LIMIT {
+    if plan.recompose.is_some() && payment_change_value < recompose_miner_fee_sats + DUST_LIMIT {
         bail!("parent change too small for recompose");
     }
 
@@ -193,13 +165,6 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
         outputs.push(TxOut {
             value: Amount::from_sat(output.value),
             script_pubkey: address_to_script(&output.address)?,
-        });
-    }
-
-    if service_fee > 0 {
-        outputs.push(TxOut {
-            value: Amount::from_sat(service_fee),
-            script_pubkey: address_to_script(SERVICE_FEE_ADDRESS)?,
         });
     }
 
@@ -319,23 +284,14 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
                 ordinals_public_key: req.ordinals_public_key.clone(),
                 payment_public_key: req.payment_public_key.clone(),
 
-                fee_rate,
+                miner_fee_sats: recompose_miner_fee_sats,
             })?;
-
-            if result.network_fee != recompose_network_fee {
-                bail!(
-                    "recompose fee mismatch: reserved {}, built {}",
-                    recompose_network_fee,
-                    result.network_fee
-                );
-            }
 
             Some(ExtractRecomposePsbtResponse {
                 psbt: result.psbt,
                 unsigned_txid: result.unsigned_txid,
                 sign_inputs: result.sign_inputs,
-                network_fee: result.network_fee,
-                vsize: result.vsize,
+                miner_fee_sats: result.miner_fee_sats,
                 change_output_index: result.change_output_index,
                 change_value: result.change_value,
             })
@@ -354,14 +310,11 @@ pub fn run_extract_build_psbt(req: ExtractBuildPsbtRequest) -> Result<ExtractBui
         psbt: psbt_base64,
         unsigned_txid,
         sign_inputs,
-        network_fee,
-        recompose_network_fee,
-        service_fee,
-        total: network_fee
-            .checked_add(recompose_network_fee)
-            .and_then(|value| value.checked_add(service_fee))
-            .ok_or_else(|| anyhow!("total fee overflow"))?,
-        vsize: parent_vsize,
+        miner_fee_sats,
+        recompose_miner_fee_sats,
+        total_miner_fee_sats: miner_fee_sats
+            .checked_add(recompose_miner_fee_sats)
+            .ok_or_else(|| anyhow!("total miner fee overflow"))?,
         ordinal_outputs: plan.outputs.len(),
         tx_outputs,
         payment_change_output_index,
@@ -575,12 +528,45 @@ fn is_segwit_address(address: &str) -> bool {
     address.to_ascii_lowercase().starts_with("bc1")
 }
 
+fn resolve_recompose_miner_fee(recompose_required: bool, supplied_fee: Option<u64>) -> Result<u64> {
+    match (recompose_required, supplied_fee) {
+        (true, Some(fee)) => Ok(fee),
+        (true, None) => bail!("extract recompose requires a recompose miner fee"),
+        (false, Some(_)) => {
+            bail!("extract without recompose must not include a recompose miner fee")
+        }
+        (false, None) => Ok(0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::execution_guard::CurrentSatpoint;
 
-    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
+    const ADDRESS: &str = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+
+    #[test]
+    fn recompose_requires_its_own_miner_fee() {
+        let error =
+            resolve_recompose_miner_fee(true, None).expect_err("recompose fee must be required");
+
+        assert_eq!(
+            error.to_string(),
+            "extract recompose requires a recompose miner fee"
+        );
+    }
+
+    #[test]
+    fn extract_without_recompose_rejects_recompose_fee() {
+        let error = resolve_recompose_miner_fee(false, Some(1))
+            .expect_err("unused recompose fee must be rejected");
+
+        assert_eq!(
+            error.to_string(),
+            "extract without recompose must not include a recompose miner fee"
+        );
+    }
 
     fn state(value: u64, satpoints: Vec<(u64, Vec<&str>, u64)>) -> CurrentOutputState {
         CurrentOutputState {

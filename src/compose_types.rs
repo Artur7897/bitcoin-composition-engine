@@ -17,8 +17,6 @@ pub struct ComposePlanRequest {
     pub root_id: String,
     pub root_postage: u64,
     pub items: Vec<ComposePlanItem>,
-    pub fee_rate: Option<u64>,
-    pub payment_method: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -26,9 +24,6 @@ pub struct ComposePlanRequest {
 pub struct ComposePlanResponse {
     pub ok: bool,
     pub packable: bool,
-    pub network_fee: u64,
-    pub service_fee: u64,
-    pub total: u64,
     pub planned_offsets: Vec<u64>,
 }
 
@@ -49,8 +44,7 @@ pub struct ComposeBuildPsbtRequest {
 
     pub payment_utxos: Vec<Utxo>,
 
-    pub fee_rate: Option<u64>,
-    pub payment_method: Option<String>,
+    pub miner_fee_sats: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,9 +54,7 @@ pub struct ComposeBuildPsbtResponse {
     pub psbt: String,
     pub unsigned_txid: String,
     pub sign_inputs: BTreeMap<String, Vec<u32>>,
-    pub network_fee: u64,
-    pub service_fee: u64,
-    pub total: u64,
+    pub miner_fee_sats: u64,
     pub planned_offsets: Vec<u64>,
 }
 
