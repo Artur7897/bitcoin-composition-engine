@@ -33,6 +33,8 @@ pub struct VerifyComposeRequest {
 
     #[serde(default)]
     pub specs: BTreeMap<String, Value>,
+
+    pub fee_rate: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -77,11 +79,6 @@ pub struct VerifyComposeResponse {
 
     pub ordered_inputs: Vec<VerifiedComposeInput>,
     pub items: Vec<VerifiedComposeItem>,
-
-    /*
-     * Canonical structural specs preserved from source verification.
-     */
-    pub validated_specs: BTreeMap<String, StructuralSpec>,
 
     /*
      * Plan produced independently by BCE.
@@ -140,7 +137,6 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
      * an already existing state.
      */
     let mut source_units = Vec::new();
-    let mut validated_specs = BTreeMap::new();
 
     for source in req.sources {
         let source_ids: BTreeSet<String> = source
@@ -173,8 +169,6 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
         })?;
 
         let target_start = source_target_start(&verified.items, &expected_ids)?;
-
-        validated_specs.extend(verified.validated_specs);
 
         source_units.push(SourceUnit {
             outpoint: verified.input_utxo,
@@ -224,6 +218,7 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
         root_id: physical_root_id.clone(),
         root_postage,
         items: compose_items,
+        fee_rate: req.fee_rate,
     })?;
 
     let (ordered_inputs, final_items, expected_input_offsets, total_value) =
@@ -255,7 +250,6 @@ pub fn verify_compose(req: VerifyComposeRequest) -> Result<VerifyComposeResponse
         total_value,
         ordered_inputs,
         items: final_items,
-        validated_specs,
         core_plan,
     })
 }
@@ -740,6 +734,7 @@ mod tests {
                 source(&child_txid, 600, vec![("LEAF", 0)]),
             ],
             specs,
+            fee_rate: Some(1),
         })
         .unwrap();
 
@@ -751,19 +746,6 @@ mod tests {
         assert_eq!(result.items[0].offset, 0);
         assert_eq!(result.items[1].id, "NODE");
         assert_eq!(result.items[1].offset, 600);
-
-        let validated = result
-            .validated_specs
-            .get("NODE")
-            .expect("validated NODE spec must survive source verification");
-
-        assert_eq!(validated.version, 1);
-        assert_eq!(validated.root_level, "A");
-        assert_eq!(validated.relations.len(), 1);
-        assert_eq!(validated.relations[0].parent_level, "A");
-        assert_eq!(validated.relations[0].child_level, "B");
-        assert_eq!(validated.relations[0].direction, Direction::Negative);
-        assert_eq!(validated.relations[0].max_children, 1);
     }
 
     #[test]
@@ -796,6 +778,7 @@ mod tests {
                 source(&root_txid, 546, vec![("ROOT", 0)]),
             ],
             specs,
+            fee_rate: Some(1),
         })
         .unwrap();
 
@@ -855,6 +838,7 @@ mod tests {
                 source(&child_txid, 600, vec![("CHILD", 0)]),
             ],
             specs,
+            fee_rate: Some(1),
         })
         .err()
         .expect("ambiguous direction must fail");

@@ -21,6 +21,7 @@ mod split_broadcast;
 mod split_plan;
 mod split_psbt;
 mod split_types;
+mod tx_broadcast;
 pub mod verify;
 pub mod verify_compose;
 
@@ -135,6 +136,13 @@ fn main() {
 
             req.and_then(insert_broadcast::run_insert_broadcast)
                 .and_then(|v| serde_json::to_string(&v).map_err(Into::into))
+        }
+
+        "tx-broadcast" => {
+            let req: Result<tx_broadcast::TxBroadcastRequest> = parse_json(payload_raw);
+
+            req.and_then(tx_broadcast::run_tx_broadcast)
+                .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
         }
 
         "verify-composition" => {

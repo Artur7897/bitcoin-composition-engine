@@ -11,7 +11,7 @@ use std::{
 
 use crate::compose_types::{ComposeBuildPsbtRequest, ComposeBuildPsbtResponse};
 use crate::execution_guard::{validate_current_output, CurrentOutputState};
-use crate::fees::DUST_LIMIT;
+use crate::fees::{estimate_network_fee, DUST_LIMIT};
 use crate::models::Utxo;
 
 pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBuildPsbtResponse> {
@@ -99,9 +99,10 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
             .ok_or_else(|| anyhow!("payment value overflow"))
     })?;
 
-    let miner_fee_sats = req.miner_fee_sats;
+    let (vsize, network_fee) =
+        estimate_network_fee(inputs.len(), 2, req.fee_rate.unwrap_or(1))?;
 
-    let required_payment = miner_fee_sats
+    let required_payment = network_fee
         .checked_add(DUST_LIMIT)
         .ok_or_else(|| anyhow!("required payment overflow"))?;
 
@@ -114,7 +115,7 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
     }
 
     let change_value = payment_value
-        .checked_sub(miner_fee_sats)
+        .checked_sub(network_fee)
         .ok_or_else(|| anyhow!("invalid payment change"))?;
 
     if change_value < DUST_LIMIT {
@@ -210,12 +211,17 @@ pub fn run_compose_build_psbt(req: ComposeBuildPsbtRequest) -> Result<ComposeBui
             .ok_or_else(|| anyhow!("compose offset overflow"))?;
     }
 
+    let total = network_fee;
+
+    let _ = vsize;
+
     Ok(ComposeBuildPsbtResponse {
         ok: true,
         psbt: psbt_base64,
         unsigned_txid,
         sign_inputs,
-        miner_fee_sats,
+        network_fee,
+        total,
         planned_offsets,
     })
 }
@@ -506,7 +512,7 @@ mod tests {
     use super::*;
     use crate::execution_guard::CurrentSatpoint;
 
-    const ADDRESS: &str = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
 
     fn state(value: u64, ids: Vec<&str>) -> CurrentOutputState {
         CurrentOutputState {

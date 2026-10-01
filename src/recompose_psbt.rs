@@ -7,7 +7,7 @@ use bitcoin::{
 use std::{collections::BTreeMap, str::FromStr};
 
 use crate::extract::{ExtractOutput, ExtractOutputKind, RecomposeIntent};
-use crate::fees::DUST_LIMIT;
+use crate::fees::{estimate_network_fee, DUST_LIMIT};
 
 pub struct RecomposeBuildRequest {
     pub parent_txid: String,
@@ -27,7 +27,7 @@ pub struct RecomposeBuildRequest {
     pub ordinals_public_key: Option<String>,
     pub payment_public_key: Option<String>,
 
-    pub miner_fee_sats: u64,
+    pub fee_rate: u64,
 }
 
 #[derive(Debug)]
@@ -36,10 +36,23 @@ pub struct RecomposeBuildResult {
     pub unsigned_txid: String,
     pub sign_inputs: BTreeMap<String, Vec<u32>>,
 
-    pub miner_fee_sats: u64,
+    pub network_fee: u64,
+    pub vsize: u64,
 
     pub change_output_index: u32,
     pub change_value: u64,
+}
+
+pub fn estimate_recompose_fee(remainder_input_count: usize, fee_rate: u64) -> Result<(u64, u64)> {
+    if remainder_input_count < 2 {
+        bail!("recompose requires at least two remainder inputs");
+    }
+
+    let input_count = remainder_input_count
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("recompose input count overflow"))?;
+
+    estimate_network_fee(input_count, 2, fee_rate)
 }
 
 pub fn build_recompose_psbt(req: RecomposeBuildRequest) -> Result<RecomposeBuildResult> {
@@ -57,11 +70,12 @@ pub fn build_recompose_psbt(req: RecomposeBuildRequest) -> Result<RecomposeBuild
 
     let parent_txid = Txid::from_str(&req.parent_txid)?;
 
-    let miner_fee_sats = req.miner_fee_sats;
+    let (vsize, network_fee) =
+        estimate_recompose_fee(req.recompose.input_output_indices.len(), req.fee_rate)?;
 
     let change_value = req
         .payment_change_value
-        .checked_sub(miner_fee_sats)
+        .checked_sub(network_fee)
         .ok_or_else(|| anyhow!("payment change cannot pay recompose fee"))?;
 
     if change_value < DUST_LIMIT {
@@ -191,7 +205,8 @@ pub fn build_recompose_psbt(req: RecomposeBuildRequest) -> Result<RecomposeBuild
         psbt: psbt_base64,
         unsigned_txid,
         sign_inputs,
-        miner_fee_sats,
+        network_fee,
+        vsize,
         change_output_index: 1,
         change_value,
     })
@@ -305,7 +320,7 @@ mod tests {
     use base64::engine::general_purpose;
     use bitcoin::psbt::Psbt;
 
-    const ADDRESS: &str = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
 
     fn parent_outputs() -> Vec<ExtractOutput> {
         vec![
@@ -372,7 +387,7 @@ mod tests {
             change_address: ADDRESS.to_string(),
             ordinals_public_key: None,
             payment_public_key: None,
-            miner_fee_sats: 300,
+            fee_rate: 1,
         }
     }
 
@@ -380,7 +395,8 @@ mod tests {
     fn builds_expected_child_transaction() {
         let result = build_recompose_psbt(request()).expect("recompose PSBT must build");
 
-        assert_eq!(result.miner_fee_sats, 300);
+        assert_eq!(result.network_fee, 300);
+        assert_eq!(result.vsize, 300);
         assert_eq!(result.change_output_index, 1);
         assert_eq!(result.change_value, 7796);
 

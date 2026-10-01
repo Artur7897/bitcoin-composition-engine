@@ -14,7 +14,7 @@ use crate::insert::{
 };
 use crate::models::Utxo;
 
-use crate::fees::DUST_LIMIT;
+use crate::fees::{estimate_network_fee, DUST_LIMIT};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InsertBuildPsbtRequest {
@@ -32,8 +32,7 @@ pub struct InsertBuildPsbtRequest {
     pub ordered_groups: Vec<Vec<String>>,
 
     pub payment_utxos: Vec<Utxo>,
-    pub primary_miner_fee_sats: u64,
-    pub secondary_miner_fee_sats: Option<u64>,
+    pub fee_rate: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -42,7 +41,8 @@ pub struct InsertPsbtTransaction {
     pub unsigned_txid: String,
     pub sign_inputs: BTreeMap<String, Vec<u32>>,
 
-    pub miner_fee_sats: u64,
+    pub network_fee: u64,
+    pub vsize: u64,
 
     pub ordinal_inputs: usize,
     pub ordinal_outputs: usize,
@@ -70,7 +70,8 @@ pub struct InsertBuildPsbtResponse {
     /// Present only for SplitAndInsert.
     pub child: Option<InsertPsbtTransaction>,
 
-    pub total_miner_fee_sats: u64,
+    pub network_fee: u64,
+    pub total: u64,
 
     pub final_total_value: u64,
     pub final_groups: Vec<PlannedInsertGroup>,
@@ -88,6 +89,8 @@ pub fn run_insert_build_psbt(req: InsertBuildPsbtRequest) -> Result<InsertBuildP
      */
     let execution = build_execution_state(&req)?;
 
+    let fee_rate = req.fee_rate.unwrap_or(1).max(1);
+
     let plan = run_insert_plan(InsertPlanRequest {
         input_utxo: req.input_utxo.clone(),
         ordinals_address: req.ordinals_address.clone(),
@@ -97,69 +100,44 @@ pub fn run_insert_build_psbt(req: InsertBuildPsbtRequest) -> Result<InsertBuildP
         ordered_groups: req.ordered_groups.clone(),
     })?;
 
-    validate_insert_miner_fees(&plan.mode, req.secondary_miner_fee_sats)?;
-
     match plan.mode {
         InsertPlanMode::DirectAppend => {
-            let primary =
-                build_direct_append_psbt(&req, &plan, &execution, req.primary_miner_fee_sats)?;
+            let primary = build_direct_append_psbt(&req, &plan, &execution, fee_rate)?;
 
-            let total_miner_fee_sats = primary.miner_fee_sats;
+            let network_fee = primary.network_fee;
 
             Ok(InsertBuildPsbtResponse {
                 ok: true,
                 mode: plan.mode,
                 primary,
                 child: None,
-                total_miner_fee_sats,
+                network_fee,
+                total: network_fee,
                 final_total_value: plan.final_total_value,
                 final_groups: plan.final_groups,
             })
         }
 
         InsertPlanMode::SplitAndInsert => {
-            let secondary_miner_fee_sats = req
-                .secondary_miner_fee_sats
-                .ok_or_else(|| anyhow!("split_and_insert requires a secondary miner fee"))?;
+            let (primary, child) =
+                build_split_and_insert_psbts(&req, &plan, &execution, fee_rate)?;
 
-            let (primary, child) = build_split_and_insert_psbts(
-                &req,
-                &plan,
-                &execution,
-                req.primary_miner_fee_sats,
-                secondary_miner_fee_sats,
-            )?;
-
-            let total_miner_fee_sats = primary
-                .miner_fee_sats
-                .checked_add(child.miner_fee_sats)
-                .ok_or_else(|| anyhow!("combined miner fee overflow"))?;
+            let network_fee = primary
+                .network_fee
+                .checked_add(child.network_fee)
+                .ok_or_else(|| anyhow!("combined network fee overflow"))?;
 
             Ok(InsertBuildPsbtResponse {
                 ok: true,
                 mode: plan.mode,
                 primary,
                 child: Some(child),
-                total_miner_fee_sats,
+                network_fee,
+                total: network_fee,
                 final_total_value: plan.final_total_value,
                 final_groups: plan.final_groups,
             })
         }
-    }
-}
-
-fn validate_insert_miner_fees(
-    mode: &InsertPlanMode,
-    secondary_miner_fee_sats: Option<u64>,
-) -> Result<()> {
-    match mode {
-        InsertPlanMode::DirectAppend if secondary_miner_fee_sats.is_some() => {
-            bail!("direct append must not include a secondary miner fee")
-        }
-        InsertPlanMode::SplitAndInsert if secondary_miner_fee_sats.is_none() => {
-            bail!("split_and_insert requires a secondary miner fee")
-        }
-        _ => Ok(()),
     }
 }
 
@@ -167,7 +145,7 @@ fn build_direct_append_psbt(
     req: &InsertBuildPsbtRequest,
     plan: &crate::insert::InsertPlanResponse,
     execution: &InsertExecutionState,
-    miner_fee_sats: u64,
+    fee_rate: u64,
 ) -> Result<InsertPsbtTransaction> {
     let ordinal_input_count = plan.child_inputs.len();
 
@@ -179,9 +157,16 @@ fn build_direct_append_psbt(
         .checked_add(execution.payment_inputs.len())
         .ok_or_else(|| anyhow!("input count overflow"))?;
 
+    /*
+     * Final ordinal output + payment change.
+     */
+    let output_count = 2_usize;
+
+    let (vsize, network_fee) = estimate_network_fee(input_count, output_count, fee_rate)?;
+
     let payment_value = checked_current_payment_total(&execution.payment_inputs)?;
 
-    let required_payment = miner_fee_sats
+    let required_payment = network_fee
         .checked_add(DUST_LIMIT)
         .ok_or_else(|| anyhow!("required payment overflow"))?;
 
@@ -194,7 +179,7 @@ fn build_direct_append_psbt(
     }
 
     let payment_change_value = payment_value
-        .checked_sub(miner_fee_sats)
+        .checked_sub(network_fee)
         .ok_or_else(|| anyhow!("invalid payment change"))?;
 
     if payment_change_value < DUST_LIMIT {
@@ -322,7 +307,8 @@ fn build_direct_append_psbt(
         psbt: psbt_base64,
         unsigned_txid,
         sign_inputs,
-        miner_fee_sats,
+        network_fee,
+        vsize,
         ordinal_inputs: ordinal_input_count,
         ordinal_outputs: 1,
         tx_outputs,
@@ -335,8 +321,7 @@ fn build_split_and_insert_psbts(
     req: &InsertBuildPsbtRequest,
     plan: &crate::insert::InsertPlanResponse,
     execution: &InsertExecutionState,
-    primary_miner_fee_sats: u64,
-    secondary_miner_fee_sats: u64,
+    fee_rate: u64,
 ) -> Result<(InsertPsbtTransaction, InsertPsbtTransaction)> {
     if plan.existing_runs.len() < 2 {
         bail!("split_and_insert requires at least two existing runs");
@@ -367,10 +352,31 @@ fn build_split_and_insert_psbts(
         .checked_add(execution.payment_inputs.len())
         .ok_or_else(|| anyhow!("parent input count overflow"))?;
 
+    /*
+     * Existing ordinal runs + payment change.
+     */
+    let parent_output_count = plan
+        .existing_runs
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("parent output count overflow"))?;
+
+    let (parent_vsize, parent_network_fee) =
+        estimate_network_fee(parent_input_count, parent_output_count, fee_rate)?;
+
     let child_ordinal_input_count = plan.child_inputs.len();
 
-    let required_payment = primary_miner_fee_sats
-        .checked_add(secondary_miner_fee_sats)
+    let child_input_count = child_ordinal_input_count
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("child input count overflow"))?;
+
+    let child_output_count = 2_usize;
+
+    let (child_vsize, child_network_fee) =
+        estimate_network_fee(child_input_count, child_output_count, fee_rate)?;
+
+    let required_payment = parent_network_fee
+        .checked_add(child_network_fee)
         .and_then(|value| value.checked_add(DUST_LIMIT))
         .ok_or_else(|| anyhow!("required payment overflow"))?;
 
@@ -383,11 +389,11 @@ fn build_split_and_insert_psbts(
     }
 
     let parent_change_value = payment_value
-        .checked_sub(primary_miner_fee_sats)
+        .checked_sub(parent_network_fee)
         .ok_or_else(|| anyhow!("invalid parent change"))?;
 
     let child_change_value = parent_change_value
-        .checked_sub(secondary_miner_fee_sats)
+        .checked_sub(child_network_fee)
         .ok_or_else(|| anyhow!("parent change cannot pay child fee"))?;
 
     if child_change_value < DUST_LIMIT {
@@ -498,7 +504,8 @@ fn build_split_and_insert_psbts(
         psbt: general_purpose::STANDARD.encode(parent_psbt.serialize()),
         unsigned_txid: parent_txid.to_string(),
         sign_inputs: parent_sign_inputs,
-        miner_fee_sats: primary_miner_fee_sats,
+        network_fee: parent_network_fee,
+        vsize: parent_vsize,
         ordinal_inputs: 1,
         ordinal_outputs: plan.existing_runs.len(),
         tx_outputs: parent_tx_outputs,
@@ -656,7 +663,8 @@ fn build_split_and_insert_psbts(
         psbt: general_purpose::STANDARD.encode(child_psbt.serialize()),
         unsigned_txid: child_txid.to_string(),
         sign_inputs: child_sign_inputs,
-        miner_fee_sats: secondary_miner_fee_sats,
+        network_fee: child_network_fee,
+        vsize: child_vsize,
         ordinal_inputs: child_ordinal_input_count,
         ordinal_outputs: 1,
         tx_outputs: child_tx_outputs,
@@ -977,32 +985,10 @@ mod tests {
     use base64::engine::general_purpose;
     use bitcoin::psbt::Psbt;
 
-    const ADDRESS: &str = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
 
     fn ids(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
-    }
-
-    #[test]
-    fn direct_append_rejects_secondary_miner_fee() {
-        let error = validate_insert_miner_fees(&InsertPlanMode::DirectAppend, Some(1))
-            .expect_err("secondary fee must be rejected");
-
-        assert_eq!(
-            error.to_string(),
-            "direct append must not include a secondary miner fee"
-        );
-    }
-
-    #[test]
-    fn split_and_insert_requires_secondary_miner_fee() {
-        let error = validate_insert_miner_fees(&InsertPlanMode::SplitAndInsert, None)
-            .expect_err("secondary fee must be required");
-
-        assert_eq!(
-            error.to_string(),
-            "split_and_insert requires a secondary miner fee"
-        );
     }
 
     fn request(append: bool) -> InsertBuildPsbtRequest {
@@ -1067,8 +1053,7 @@ mod tests {
                 address: ADDRESS.to_string(),
                 inscriptions: Vec::new(),
             }],
-            primary_miner_fee_sats: 300,
-            secondary_miner_fee_sats: None,
+            fee_rate: Some(1),
         }
     }
 
@@ -1171,10 +1156,11 @@ mod tests {
         let execution = execution_state(&req);
         assert_eq!(plan.mode, InsertPlanMode::DirectAppend);
 
-        let primary = build_direct_append_psbt(&req, &plan, &execution, 300)
+        let primary = build_direct_append_psbt(&req, &plan, &execution, 1)
             .expect("direct append must build");
 
-        assert_eq!(primary.miner_fee_sats, 300);
+        assert_eq!(primary.network_fee, 300);
+        assert_eq!(primary.vsize, 300);
         assert_eq!(primary.ordinal_inputs, 2);
         assert_eq!(primary.ordinal_outputs, 1);
         assert_eq!(primary.tx_outputs, 2);
@@ -1197,21 +1183,23 @@ mod tests {
         let execution = execution_state(&req);
         assert_eq!(plan.mode, InsertPlanMode::SplitAndInsert);
 
-        let (primary, child) = build_split_and_insert_psbts(&req, &plan, &execution, 275, 368)
-            .expect("split insert must build");
+        let (primary, child) =
+            build_split_and_insert_psbts(&req, &plan, &execution, 1)
+                .expect("split insert must build");
 
-        assert_eq!(primary.miner_fee_sats, 275);
+        assert_eq!(primary.network_fee, 275);
         assert_eq!(primary.ordinal_outputs, 2);
         assert_eq!(primary.payment_change_output_index, 2);
         assert_eq!(primary.payment_change_value, 9725);
 
         let parent = decode_psbt(&primary.psbt);
 
+        assert_eq!(parent.unsigned_tx.output.len(), 3);
         assert_eq!(parent.unsigned_tx.output[0].value.to_sat(), 1246);
         assert_eq!(parent.unsigned_tx.output[1].value.to_sat(), 1400);
         assert_eq!(parent.unsigned_tx.output[2].value.to_sat(), 9725);
 
-        assert_eq!(child.miner_fee_sats, 368);
+        assert_eq!(child.network_fee, 368);
         assert_eq!(child.ordinal_inputs, 3);
         assert_eq!(child.payment_change_value, 9357);
 
@@ -1229,7 +1217,7 @@ mod tests {
         assert_eq!(tx.output[0].value.to_sat(), 3296);
         assert_eq!(tx.output[1].value.to_sat(), 9357);
 
-        assert_eq!(primary.miner_fee_sats + child.miner_fee_sats, 643);
+        assert_eq!(primary.network_fee + child.network_fee, 643);
     }
 
     #[test]
@@ -1239,7 +1227,7 @@ mod tests {
 
         let plan = plan(&req);
         let execution = execution_state(&req);
-        let error = build_split_and_insert_psbts(&req, &plan, &execution, 275, 368)
+        let error = build_split_and_insert_psbts(&req, &plan, &execution, 1)
             .expect_err("small payment must fail");
 
         assert!(error.to_string().contains("payment UTXOs too small"));
@@ -1252,7 +1240,7 @@ mod tests {
 
         let plan = plan(&req);
         let execution = execution_state(&req);
-        let error = build_split_and_insert_psbts(&req, &plan, &execution, 275, 368)
+        let error = build_split_and_insert_psbts(&req, &plan, &execution, 1)
             .expect_err("legacy parent must fail");
 
         assert!(error
@@ -1266,7 +1254,7 @@ mod execution_guard_tests {
     use super::*;
     use crate::execution_guard::CurrentSatpoint;
 
-    const ADDRESS: &str = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
 
     fn state(
         outpoint: &str,

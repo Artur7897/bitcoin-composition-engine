@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use std::collections::HashSet;
 
 use crate::compose_types::{ComposePlanRequest, ComposePlanResponse};
+use crate::fees::estimate_network_fee;
 
 pub fn run_compose_plan(req: ComposePlanRequest) -> Result<ComposePlanResponse> {
     if req.root_id.trim().is_empty() {
@@ -33,6 +34,21 @@ pub fn run_compose_plan(req: ComposePlanRequest) -> Result<ComposePlanResponse> 
         }
     }
 
+    let fee_rate = req.fee_rate.unwrap_or(1).max(1);
+
+    let input_count = req
+        .items
+        .len()
+        .checked_add(2)
+        .ok_or_else(|| anyhow!("compose input count overflow"))?;
+
+    /*
+     * Composed ordinal output + payment change output.
+     */
+    let (_, network_fee) = estimate_network_fee(input_count, 2, fee_rate)?;
+
+    let total = network_fee;
+
     let mut planned_offsets = Vec::with_capacity(req.items.len());
 
     let mut next_offset = req.root_postage;
@@ -48,6 +64,8 @@ pub fn run_compose_plan(req: ComposePlanRequest) -> Result<ComposePlanResponse> 
     Ok(ComposePlanResponse {
         ok: true,
         packable: true,
+        network_fee,
+        total,
         planned_offsets,
     })
 }

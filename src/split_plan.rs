@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use std::collections::HashSet;
 
+use crate::fees::estimate_network_fee;
 use crate::split_types::{SplitGroup, SplitPlanRequest, SplitPlanResponse};
 
 pub fn run_split_plan(req: SplitPlanRequest) -> Result<SplitPlanResponse> {
@@ -16,11 +17,27 @@ pub fn run_split_plan(req: SplitPlanRequest) -> Result<SplitPlanResponse> {
         bail!("input UTXO has zero value");
     }
 
+    let fee_rate = req.fee_rate.unwrap_or(1).max(1);
+
     let outputs = normalize_split_groups(req.groups, req.total_value)?;
+
+    /*
+     * One output per split group plus payment change.
+     */
+    let output_count = outputs
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("split output count overflow"))?;
+
+    let (_, network_fee) = estimate_network_fee(2, output_count, fee_rate)?;
+
+    let total = network_fee;
 
     Ok(SplitPlanResponse {
         ok: true,
         splittable: true,
+        network_fee,
+        total,
         output_count: outputs.len(),
         outputs,
     })

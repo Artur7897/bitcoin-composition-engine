@@ -7,7 +7,7 @@ use bitcoin::{
 use std::{collections::BTreeMap, str::FromStr};
 
 use crate::execution_guard::{validate_current_output, CurrentOutputState};
-use crate::fees::DUST_LIMIT;
+use crate::fees::{estimate_network_fee, DUST_LIMIT};
 use crate::split_plan::run_split_plan;
 use crate::split_types::{
     PaymentUtxo, SplitBuildPsbtRequest, SplitBuildPsbtResponse, SplitGroup, SplitPlanRequest,
@@ -39,9 +39,12 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
         payment_utxos.push(current_output_to_payment(&current, &req.payment_address)?);
     }
 
+    let fee_rate = req.fee_rate.unwrap_or(1).max(1);
+
     let plan = run_split_plan(SplitPlanRequest {
         input_utxo: req.input_utxo.clone(),
         ordinals_address: req.ordinals_address.clone(),
+        fee_rate: Some(fee_rate),
         total_value: req.total_value,
         groups: req.groups.clone(),
     })?;
@@ -56,9 +59,18 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
         .checked_add(payment_utxos.len())
         .ok_or_else(|| anyhow!("split input count overflow"))?;
 
-    let miner_fee_sats = req.miner_fee_sats;
+    /*
+     * Group outputs + payment change.
+     */
+    let output_count = plan
+        .outputs
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("split output count overflow"))?;
 
-    let required_payment = miner_fee_sats
+    let (vsize, network_fee) = estimate_network_fee(input_count, output_count, fee_rate)?;
+
+    let required_payment = network_fee
         .checked_add(DUST_LIMIT)
         .ok_or_else(|| anyhow!("required payment overflow"))?;
 
@@ -71,7 +83,7 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
     }
 
     let change_value = payment_value
-        .checked_sub(miner_fee_sats)
+        .checked_sub(network_fee)
         .ok_or_else(|| anyhow!("invalid payment change"))?;
 
     if change_value < DUST_LIMIT {
@@ -193,14 +205,18 @@ pub fn run_split_build_psbt(req: SplitBuildPsbtRequest) -> Result<SplitBuildPsbt
         .or_default()
         .extend(payment_indices);
 
+    let total = network_fee;
+
     Ok(SplitBuildPsbtResponse {
         ok: true,
         psbt: psbt_base64,
         unsigned_txid,
         sign_inputs,
-        miner_fee_sats,
+        network_fee,
+        total,
         outputs: plan.outputs.len(),
         tx_outputs,
+        vsize,
     })
 }
 
@@ -447,7 +463,7 @@ mod tests {
     use super::*;
     use crate::execution_guard::CurrentSatpoint;
 
-    const ADDRESS: &str = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    const ADDRESS: &str = "bc1qznl7wxgtemt5eprmr6g3yj7nn7xh5gtzuvezuz";
 
     fn state(value: u64, satpoints: Vec<(u64, Vec<&str>, u64)>) -> CurrentOutputState {
         CurrentOutputState {
