@@ -12,27 +12,25 @@ It implements four operations:
 
 ## Core principle
 
-The Core understands only canonical Bitcoin geometry:
+BCE separates structural description from physical execution.
 
-- inscription IDs
-- offsets
-- postages
-- physical order
-- source UTXOs
+The structural language is based on three primary concepts:
 
+- NUMBER
+- LEVEL
+- DIRECTION
 
-```text
-Viewer / Composer
-        ↓
-Structural Spec
-        ↓
-Verify
-        ↓
-Canonical Core geometry
-        ↓
-PSBT
-        ↓
-External wallet signature
+Higher-order concepts such as parent, child, group, hierarchy, nesting and subtree are derived from these primitives.
+
+Verify reduces structural intent into deterministic physical geometry.
+
+BCE Core executes the resulting linear representation using:
+
+- order
+- offset
+- postage
+
+Structural information required for deterministic downstream interpretation must be preserved even when BCE Core itself consumes only the reduced physical representation.
 
 ## Operations
 ### Compose
@@ -60,25 +58,41 @@ between existing groups uses a split parent and composition child transaction.
 BCE includes two verification commands:
 
 verify-composition validates an existing composed UTXO.
-verify-compose validates a future semantic composition and compares it with
+verify-compose validates a future structural composition and compares it with
 the independently generated Core plan.
 
-The semantic root does not need to be located at physical offset 0.
+The structural root does not need to be located at physical offset 0.
 
 Structural Specs support:
 
-levels A through J
-direction + and -
-multiple directional spaces
-nested contiguous subtrees
-deterministic capacity limits
-## Fees
+- ordered level identifiers such as A, B, C, ...
+- numbered structural instances such as B1, B2, B3
+- direction + and -
+- multiple directional spaces
+- nested contiguous subtrees
+- deterministic capacity limits
 
-BCE does not estimate or select miner fees.
+A level expresses structural depth. Number distinguishes and orders instances within a level. Direction determines on which physical side of a parent a related child structure is linearized.
 
-PSBT build requests receive explicit absolute miner fee amounts in sats from the caller. BCE uses those amounts only to preserve input/output value balance and calculate payment change. Planning and verification are fee-independent.
+Terms such as rootLevel, parentLevel and childLevel describe roles assumed by levels within structural relations; they are not separate primitives.
 
-There is no BCE service fee and no default postage.
+## Information preservation
+
+Structural reduction may translate logical structure into physical geometry, but it must preserve the information required for deterministic downstream interpretation.
+
+BCE Core may consume only the reduced physical representation, while normalized structural information remains available to compatible resolvers and interpreters.
+
+Observed on-chain information must not be silently discarded merely because it is not selected as an independent structural node.
+
+## Network fees
+
+Planning and verification are independent from transaction funding.
+
+During PSBT construction, BCE estimates transaction size from the concrete input and output counts and applies the requested `fee_rate`.
+
+The resulting network fee is used when balancing payment inputs, outputs and payment change.
+
+There is no default postage.
 
 ## Build
 
@@ -106,7 +120,6 @@ compose-build-psbt
 compose-broadcast
 
 split-plan
-split-build-psbt
 split-build-psbt
 split-broadcast
 

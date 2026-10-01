@@ -130,7 +130,7 @@ A group cannot be inserted before the protected physical beginning of the existi
 
 Invalid insertion requests are rejected during planning.
 
-Semantic root position and physical UTXO origin remain separate concepts.
+Structural root position and physical UTXO origin remain separate concepts.
 
 The insertion planner operates on verified physical groups.
 
@@ -284,13 +284,17 @@ Broadcast processing includes:
 - broadcasting through Bitcoin Core JSON-RPC
 - verifying the transaction ID returned by Bitcoin Core
 
-## Fees
+## Network fees
 
 Insert is one high-level operation.
 
 A Split-and-Insert flow may contain parent and child transactions, but it remains one logical Insert request.
 
-The caller supplies `primary_miner_fee_sats`. Split-and-Insert additionally requires `secondary_miner_fee_sats`; Direct Append rejects a secondary fee. BCE does not estimate either fee and uses the supplied amounts only to calculate payment change.
+During PSBT construction, BCE applies the requested `fee_rate` to the concrete transaction shape and derives the network fee from the estimated virtual size.
+
+For Split-and-Insert, parent and child transactions are funded independently from their respective input and output counts. Direct Append requires only the single transaction fee for its transaction shape.
+
+Network fees are accounted for separately from ordinal-bearing physical geometry and payment change.
 
 
 ## Result

@@ -2,7 +2,7 @@
 
 Bitcoin Composition Engine (BCE) is a deterministic Bitcoin UTXO composition engine.
 
-It separates semantic structure, physical verification, execution-state validation and transaction construction into distinct layers.
+It separates structural composition, physical verification, execution-state validation and transaction construction into distinct layers.
 
 The engine implements four high-level operations:
 
@@ -17,7 +17,7 @@ The architecture is intentionally application-agnostic.
 
 BCE operates through a layered flow:
 
-    semantic intent
+    structural intent
          |
          v
     Structured Spec
@@ -56,19 +56,19 @@ Each layer has one defined responsibility.
 
 ## Structured Spec
 
-Structured Spec describes hierarchy.
+Structured Spec describes structural composition.
 
-It may define:
+Its primary conceptual primitives are:
 
-- root level
-- parent-child relations
-- direction
-- capacity
-- nested structure
+- `number`
+- `level`
+- `direction`
+
+Higher-order concepts such as root, parent, child, relation, group, hierarchy, nesting, subtree and capacity are derived from these primitives.
 
 Structured Spec does not define trusted transaction geometry.
 
-It describes semantic structure that must still be translated and verified.
+It defines structural grammar that must still be translated and verified.
 
 See:
 
@@ -76,11 +76,11 @@ See:
 
 ## Verify
 
-Verify translates semantic structure into physical geometry.
+Verify translates structural composition into physical geometry.
 
 It resolves:
 
-- semantic hierarchy
+- structural hierarchy
 - physical order
 - valid groups
 - valid ranges
@@ -114,7 +114,7 @@ Its canonical geometry includes:
 - verified groups
 - verified ranges
 
-The operation layer does not require semantic hierarchy once verification has completed.
+The operation layer does not require structural hierarchy once verification has completed.
 
 ## Offsets and postage
 
@@ -225,7 +225,7 @@ External inputs still require live-state validation.
 
 BCE builds PSBTs after:
 
-- semantic verification
+- structural verification
 - physical geometry validation
 - live execution-state validation
 
@@ -258,7 +258,7 @@ BCE deliberately minimizes the trusted execution boundary.
 
 The sequence is:
 
-    semantic structure
+    structural composition
         |
         v
     verified physical intent
@@ -271,17 +271,21 @@ The sequence is:
 
 No earlier application state is accepted as physical execution truth.
 
-## Fees
+## Network fees
 
 BCE separates composition geometry from transaction funding.
 
-Planning and verification do not estimate or select miner fees. PSBT build requests receive explicit absolute miner fee amounts in sats from the caller. BCE uses those amounts only when balancing transaction inputs, outputs, and payment change.
+Planning and structural verification are independent from network-fee calculation.
 
-For parent-child flows, the caller supplies a separate miner fee for each transaction. BCE does not derive a fee rate, estimate virtual size, or impose a minimum miner fee.
+During PSBT construction, BCE determines the concrete input and output counts, estimates virtual size, and applies the requested `fee_rate`.
+
+The resulting network fee is used when balancing payment inputs, outputs and payment change.
+
+For parent-child flows, each transaction has its own network-fee calculation based on its own transaction shape.
 
 Ordinal-bearing physical spans are preserved independently from:
 
-- caller-selected miner fees
+- network fees
 - payment change
 
 Payment inputs are validated separately and must not contain inscriptions.

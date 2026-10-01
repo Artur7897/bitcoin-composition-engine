@@ -4,8 +4,6 @@
 
 Bitcoin Composition Engine (BCE) is the canonical and actively maintained composition engine.
 
-The legacy OrdiFi Core development stages are no longer part of the active BCE codebase.
-
 ## Completed
 
 - [x] Compose implementation
@@ -17,7 +15,7 @@ The legacy OrdiFi Core development stages are no longer part of the active BCE c
 - [x] Shared-satpoint handling
 - [x] Build -> Sign -> Broadcast transaction commitments
 - [x] CLI
-- [x] Node API integration
+- [x] API integration
 - [x] Apache-2.0 licensing
 - [x] Dependency/security checks
 - [x] Public-facing BCE documentation
@@ -44,4 +42,4 @@ Each smoke test should verify the full execution path:
 
 The manual smoke-test checklist is intentionally tracked separately from the automated test suite.
 
-A successful application-level end-to-end Split transaction has already been completed through the BCE-backed web application infrastructure.
+A successful application-level end-to-end Split transaction has already been completed through a BCE-backed integration path.

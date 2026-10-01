@@ -20,7 +20,7 @@ It preserves:
 - postage
 - physical value
 
-The operation does not rebuild semantic structure from scratch.
+The operation does not rebuild structural composition from scratch.
 
 It operates on verified physical ranges.
 
@@ -63,9 +63,9 @@ Extract does not allow removal of the protected root group where the operation w
 
 Invalid root extraction requests are rejected during planning.
 
-The exact semantic root may exist at a non-zero physical offset.
+The exact structural root may exist at a non-zero physical offset.
 
-Root semantics are resolved before the Extract Core operates on verified physical groups.
+The structural root is resolved before the Extract Core operates on verified physical groups.
 
 ## Multiple extracts
 
@@ -269,13 +269,17 @@ Broadcast validates the signed transaction against the expected transaction ID b
 
 Known or already-accepted transactions may be treated as successful only when the expected transaction identity matches.
 
-## Fees
+## Network fees
 
 Extract is one high-level operation.
 
 If a Recompose child is required, the operation still represents one Extract request.
 
-The caller supplies `primary_miner_fee_sats` for the parent. When Recompose is required, the caller also supplies `recompose_miner_fee_sats`. BCE does not estimate either fee; it only reserves the exact supplied amounts while calculating payment change.
+During PSBT construction, BCE applies the requested `fee_rate` to the concrete transaction shape and derives the network fee from the estimated virtual size.
+
+When Recompose is required, the parent and child transactions are funded independently from their respective input and output counts.
+
+Network fees are accounted for separately from ordinal-bearing physical geometry and payment change.
 
 
 ## Result

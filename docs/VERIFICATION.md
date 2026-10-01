@@ -1,12 +1,12 @@
 # Verification
 
-Verification translates semantic structure into canonical physical BCE geometry.
+Verification translates structural composition into canonical physical BCE geometry.
 
 It sits between Structured Spec and the Core operation layer.
 
 Verification does not replace Bitcoin as execution truth.
 
-It determines whether a semantic structure is physically coherent and produces verified groups and ranges that BCE can consume.
+It determines whether a structural composition is physically coherent and produces verified groups and ranges that BCE can consume.
 
 ## Two verification modes
 
@@ -24,7 +24,7 @@ They solve different problems.
 It compares:
 
 - the Structured Spec
-- semantic intent
+- structural intent
 - resolved on-chain inscription state
 - physical offsets
 - physical boundaries
@@ -40,7 +40,7 @@ The Core operations consume the physical representation. Resolvers and interpret
 
 It:
 
-- reads the intended semantic hierarchy
+- reads the intended structural hierarchy
 - reads the relevant Structured Specs
 - resolves the source UTXOs
 - preserves existing physical subtrees
@@ -48,13 +48,13 @@ It:
 - invokes the Compose planning layer
 - compares the independently verified structure with the generated Compose geometry
 
-The semantic layer therefore does not directly supply trusted transaction geometry.
+The structural layer therefore does not directly supply trusted transaction geometry.
 
 ## Verification boundary
 
-Verification operates on both semantic and physical information.
+Verification operates on both structural and physical information.
 
-Semantic information may include:
+Structural information may include:
 
 - root level
 - levels
@@ -77,23 +77,43 @@ Verify translates between these domains.
 
 The Core operation layer receives the physical result.
 
-## Semantic root and physical origin
+## Structural primitives
 
-The semantic root does not need to be located at physical offset 0.
+Verification operates on a structural language based on three primary concepts:
+
+- `number`
+- `level`
+- `direction`
+
+Level expresses structural depth. Number distinguishes and orders structural instances within a level. Direction contributes to the deterministic physical placement of related child structures.
+
+Higher-order concepts such as parent, child, relation, group, hierarchy, nesting and subtree are derived from these primitives.
+
+## Information preservation
+
+Structural reduction must preserve the information required for deterministic downstream interpretation.
+
+Verify may reduce structural hierarchy into physical order, groups, ranges, offsets and postage geometry, but that reduction must not silently discard structural information required by compatible resolvers or interpreters.
+
+Observed on-chain information must also be preserved even when an inscription is not selected as an independent structural node.
+
+## Structural root and physical origin
+
+The structural root does not need to be located at physical offset 0.
 
 Physical offset 0 is the beginning of the UTXO.
 
-The semantic root is defined by the Structured Spec and validated against the physical arrangement.
+The structural root is defined by the Structured Spec and validated against the physical arrangement.
 
 Therefore:
 
-    physical UTXO origin != semantic root
+    physical UTXO origin != structural root
 
 Verify must preserve this distinction.
 
 ## Nested subtrees
 
-A semantic subtree must correspond to a coherent physical range.
+A structural subtree must correspond to a coherent physical range.
 
 Nested relations may create structures such as:
 
@@ -105,7 +125,7 @@ Nested relations may create structures such as:
 
 Verify determines how each nested subtree maps onto physical order.
 
-A subtree may contain multiple physical satpoints and multiple semantic nodes.
+A subtree may contain multiple physical satpoints and multiple structural nodes.
 
 The subtree must remain physically coherent according to the declared structural relations.
 
@@ -129,7 +149,7 @@ Verify converts direction into concrete physical order before Core execution.
 
 ## Levels
 
-Levels describe semantic depth.
+Levels describe structural depth.
 
 Nodes on the same level may have different valid child arrangements.
 
@@ -159,7 +179,7 @@ A shared satpoint represents:
 
 Verification must not double-count physical value because more than one ID exists at the same satpoint.
 
-At the same time, the existence of an additional inscription ID does not automatically make that ID part of the semantic composition intent.
+At the same time, the existence of an additional inscription ID does not automatically make that ID part of the structural composition intent.
 
 This requires a distinction between:
 
@@ -168,7 +188,7 @@ This requires a distinction between:
 
 Observed state should preserve all resolved inscription information.
 
-Composition intent determines which semantic nodes participate in the declared structure.
+Composition intent determines which structural nodes participate in the declared structure.
 
 ## Observed state and composition intent
 
@@ -183,18 +203,18 @@ Observed state answers:
 
 Composition intent answers:
 
-- which IDs are selected into the semantic structure
+- which IDs are selected into the structural composition
 - which relations apply
-- which node is the semantic root
+- which node is the structural root
 - which groups should be exposed to BCE operations
 
-An inscription may be physically present without becoming an independently selected semantic node.
+An inscription may be physically present without becoming an independently selected structural node.
 
-Information that exists on-chain must not be discarded merely because it is not selected by the current semantic intent.
+Information that exists on-chain must not be discarded merely because it is not selected by the current structural intent.
 
 ## Verified groups
 
-Verification translates the semantic hierarchy into flat physical groups.
+Verification translates the structural hierarchy into flat physical groups.
 
 A verified group may contain one or more physical spans.
 
@@ -210,7 +230,7 @@ The Core operates on the resulting range and geometry.
 
 ## Physical boundaries
 
-Verify may group multiple adjacent physical spans into one semantic group.
+Verify may group multiple adjacent physical spans into one structural group.
 
 However, group boundaries must remain aligned with real physical boundaries.
 
@@ -251,7 +271,7 @@ It must not:
 - discard resolved physical state
 - create overlapping physical groups
 
-Semantic grouping may change how physical spans are interpreted, but it may not change the underlying Bitcoin geometry.
+Structural grouping may change how physical spans are interpreted, but it may not change the underlying Bitcoin geometry.
 
 ## Verification is not execution truth
 
@@ -290,7 +310,7 @@ It rejects structures that cannot be translated unambiguously into valid physica
 
 Examples include:
 
-- missing required semantic nodes
+- missing required structural nodes
 - invalid parent-child relations
 - invalid direction
 - exceeded capacity
@@ -299,7 +319,7 @@ Examples include:
 - invalid physical boundaries
 - contradictory resolved state
 
-Verification does not guess how an ambiguous semantic structure should be mapped onto Bitcoin.
+Verification does not guess how an ambiguous structural composition should be mapped onto Bitcoin.
 
 ---
 

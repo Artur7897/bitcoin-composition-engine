@@ -55,15 +55,15 @@ Compose does not flatten or reconstruct those positions.
 
 It preserves the source geometry and relocates the complete source UTXO into the resulting composition.
 
-## Semantic order
+## Structural order
 
-Semantic hierarchy is resolved before Core execution.
+Structural hierarchy is resolved before Core execution.
 
-Verify may determine that semantic structure requires a particular physical order.
+Verify may determine that structural composition requires a particular physical order.
 
 Compose receives that final ordered source geometry.
 
-The Core does not interpret semantic levels or direction.
+The Core does not interpret structural levels or direction.
 
 ## Planning
 

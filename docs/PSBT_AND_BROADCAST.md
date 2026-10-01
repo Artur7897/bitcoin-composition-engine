@@ -134,6 +134,33 @@ Broadcast handling may accept an already-known transaction state only when the t
 
 BCE never treats a different transaction as equivalent merely because it appears related to the same operation.
 
+## Generic transaction broadcast
+
+`tx-broadcast` provides a generic fail-closed broadcast path for finalized raw Bitcoin transactions.
+
+The caller supplies:
+
+- `raw_tx`
+- `expected_txid`
+
+BCE decodes the finalized transaction and derives its actual transaction ID.
+
+Broadcast proceeds only when:
+
+    decoded_txid == expected_txid
+
+BCE then submits the transaction through Bitcoin Core. An already-known transaction may be accepted only when its identity matches the committed transaction ID.
+
+The transaction ID returned by the broadcast path must also match the committed identity.
+
+A successful response contains:
+
+- `ok`
+- `txid`
+- optional `mempool_url`
+
+This generic path exists alongside the operation-specific Compose, Split, Extract and Insert broadcast flows.
+
 ## Compose broadcast
 
 Compose produces an unsigned transaction ID during PSBT construction.

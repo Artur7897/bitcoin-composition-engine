@@ -65,7 +65,7 @@ Such inscriptions remain distinct IDs, but they represent one physical position 
 
 BCE must never double-count postage or value because multiple IDs share the same satpoint.
 
-## 7. Semantic structure is translated before Core execution
+## 7. Structural composition is translated before Core execution
 
 BCE Core operates on canonical physical geometry:
 
@@ -76,7 +76,7 @@ BCE Core operates on canonical physical geometry:
 - physical order
 - verified groups and ranges
 
-Higher-level structural semantics are interpreted by Spec and Verify before they reach the Core operation layer.
+Higher-level structural rules are interpreted by Spec and Verify before they reach the Core operation layer.
 
 The Core does not require application-specific meaning in order to execute a physical UTXO operation.
 

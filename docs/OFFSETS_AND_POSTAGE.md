@@ -118,11 +118,11 @@ A and B share one physical span.
 
 The first span is still 1000 sats, not 2000 sats.
 
-## Physical units and semantic groups
+## Physical units and structural groups
 
 A physical unit is defined by distinct physical boundaries.
 
-A semantic group may contain one or more adjacent physical units.
+A structural group may contain one or more adjacent physical units.
 
 For example:
 
@@ -131,13 +131,13 @@ For example:
     0..546
     546..1546
 
-A verified semantic group may cover:
+A verified structural group may cover:
 
     0..1546
 
 This is valid because the group begins and ends on real physical boundaries.
 
-Semantic grouping may combine physical units.
+Structural grouping may combine physical units.
 
 It may not create a new physical boundary in the middle of an existing span.
 
@@ -147,7 +147,7 @@ Compose preserves complete source UTXO geometry.
 
 When source UTXOs are appended into one new composition, their internal physical spans remain intact.
 
-A source UTXO is not silently resized to fit a semantic structure.
+A source UTXO is not silently resized to fit a structural composition.
 
 Existing offsets become relative to the source position inside the resulting composition.
 
@@ -157,7 +157,7 @@ Split separates verified physical groups into independent output UTXOs.
 
 Each resulting output preserves the complete physical value of its selected range.
 
-Split does not shrink the final span of a group merely because another semantic node is expected nearby.
+Split does not shrink the final span of a group merely because another structural node is expected nearby.
 
 ## Extract
 

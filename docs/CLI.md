@@ -30,6 +30,8 @@ Current commands:
     insert-build-psbt
     insert-broadcast
 
+    tx-broadcast
+
     verify-composition
     verify-compose
 
@@ -199,7 +201,7 @@ For dependent flows, parent and child transactions must be broadcast in dependen
 
 `verify-composition` verifies an existing structured composition.
 
-It translates semantic structure into canonical physical BCE geometry.
+It translates structural composition into canonical physical BCE geometry.
 
 Verification may evaluate:
 
@@ -218,7 +220,7 @@ It does not perform transaction execution.
 
 `verify-compose` verifies intended Compose structure before physical transaction construction.
 
-It validates whether the requested semantic structure can be translated unambiguously into valid physical composition geometry.
+It validates whether the requested structural composition can be translated unambiguously into valid physical composition geometry.
 
 Successful output preserves the aggregated normalized Structural Specs as `validatedSpecs`, even though the Compose planning layer uses only the derived physical geometry.
 
@@ -255,7 +257,7 @@ Execution Guard proves current physical state.
 
 The sequence is:
 
-    semantic intent
+    structural intent
           |
           v
        Verify
@@ -274,6 +276,29 @@ The sequence is:
           |
           v
     transaction construction
+
+## tx-broadcast
+
+`tx-broadcast` provides a generic fail-closed Bitcoin transaction broadcast path.
+
+The request contains:
+
+- `raw_tx`
+- `expected_txid`
+
+BCE decodes the finalized raw transaction, derives its transaction ID and requires:
+
+    decoded_txid == expected_txid
+
+Only then is the transaction submitted through Bitcoin Core.
+
+The returned transaction ID must also match the committed transaction identity.
+
+A successful response includes:
+
+- `ok`
+- `txid`
+- optional `mempool_url`
 
 ## Broadcast commitment
 

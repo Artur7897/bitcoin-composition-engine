@@ -31,7 +31,7 @@ The composition may contain:
 
 ## Verified groups
 
-Split does not invent its own semantic grouping.
+Split does not invent its own structural grouping.
 
 Verify translates the Structured Spec into flat physical groups.
 
@@ -85,7 +85,7 @@ is invalid unless 1092 is itself a real physical boundary.
 
 Each split output preserves the complete physical value of its verified range.
 
-BCE does not shrink postage to match semantic expectations.
+BCE does not shrink postage to match structural expectations.
 
 If a group spans:
 

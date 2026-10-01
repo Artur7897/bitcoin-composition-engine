@@ -86,7 +86,7 @@ BCE must preserve the fact that both inscriptions exist.
 
 Therefore:
 
-    semantic identity count != physical position count
+    structural identity count != physical position count
 
 The engine must keep both truths.
 
@@ -112,7 +112,7 @@ This representation preserves:
 
 Observed on-chain state and composition intent are different.
 
-An additional inscription sharing a satpoint may physically exist without being selected as an independent semantic node.
+An additional inscription sharing a satpoint may physically exist without being selected as an independent structural node.
 
 For example:
 
@@ -131,16 +131,16 @@ At the same time, B does not automatically become an additional composition node
 
 ## Verification
 
-Verify must preserve shared-satpoint truth while translating semantic structure.
+Verify must preserve shared-satpoint truth while translating structural composition.
 
 It must not:
 
 - count the same physical span twice
 - invent another boundary
-- automatically promote every co-satpoint ID into semantic structure
+- automatically promote every co-satpoint ID into the structural composition
 - erase co-satpoint inscription information
 
-The semantic structure determines which IDs participate as selected nodes.
+The structural composition determines which IDs participate as selected nodes.
 
 The observed physical state preserves everything that exists on-chain.
 
